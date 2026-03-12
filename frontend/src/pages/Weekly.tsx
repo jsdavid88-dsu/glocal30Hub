@@ -1,5 +1,18 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useRole } from '../contexts/RoleContext'
+import {
+  DndContext,
+  DragOverlay,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { useDroppable } from '@dnd-kit/core'
 
 // ─── Shared styles ───
 const cardStyle = {
@@ -9,9 +22,64 @@ const cardStyle = {
   boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)',
 }
 
-// ─── Mock Data: Professor ───
+// ─── Types ───
+type TaskType = '연구' | '논문리뷰' | '개발' | '기타'
+
+interface TaskItem {
+  id: string
+  title: string
+  description: string
+  type: TaskType
+  url?: string
+  guide?: string
+  carryOver?: boolean
+}
+
+interface StudentInfo {
+  name: string
+  badge: '지도학생' | '프로젝트'
+}
+
+// ─── Mock Data ───
 const weekOptions = ['이번 주 (3/10 ~ 3/14)', '지난 주 (3/3 ~ 3/7)', '2주 전 (2/24 ~ 2/28)']
 
+const initialPoolTasks: TaskItem[] = [
+  { id: 'task-1', title: 'Diffusion Model Survey 2026', description: '최신 diffusion 모델 동향 파악', type: '논문리뷰' },
+  { id: 'task-2', title: 'GAN vs Diffusion 비교 실험', description: 'FID/IS 지표 비교', type: '연구' },
+  { id: 'task-3', title: '데이터 전처리 파이프라인 개선', description: '배치 처리 속도 최적화', type: '개발' },
+  { id: 'task-4', title: 'NeRF 3D Reconstruction 논문', description: 'SIGGRAPH 2026 논문', type: '논문리뷰' },
+  { id: 'task-5', title: '연구실 세미나 발표 준비', description: '3/20 발표', type: '기타' },
+]
+
+const initialCarryOverTasks: TaskItem[] = [
+  { id: 'carry-1', title: 'StyleGAN3 벤치마크', description: '지난주 미완료', type: '연구', carryOver: true },
+]
+
+const mockStudents: StudentInfo[] = [
+  { name: '한감성', badge: '지도학생' },
+  { name: '윤스마', badge: '지도학생' },
+  { name: '정인턴', badge: '지도학생' },
+  { name: '강데이', badge: '지도학생' },
+  { name: '박프로', badge: '프로젝트' },
+]
+
+// carry-1 starts assigned to 한감성
+const initialAssignments: Record<string, string[]> = {
+  '한감성': ['carry-1'],
+  '윤스마': [],
+  '정인턴': [],
+  '강데이': [],
+  '박프로': [],
+}
+
+const typeBadgeColors: Record<TaskType, { bg: string; color: string }> = {
+  '연구': { bg: '#e0e7ff', color: '#4338ca' },
+  '논문리뷰': { bg: '#dbeafe', color: '#1d4ed8' },
+  '개발': { bg: '#d1fae5', color: '#047857' },
+  '기타': { bg: '#f1f5f9', color: '#64748b' },
+}
+
+// ─── Student/External Mock Data ───
 const studentSummaries = [
   { name: '한감성', done: 3, inProgress: 2, notStarted: 0, dailyCount: 5 },
   { name: '윤스마', done: 1, inProgress: 1, notStarted: 2, dailyCount: 3 },
@@ -20,15 +88,6 @@ const studentSummaries = [
   { name: '송리서', done: 0, inProgress: 2, notStarted: 1, dailyCount: 2 },
 ]
 
-const adviseeStudents = ['한감성', '윤스마', '정인턴', '강데이', '송리서']
-
-const carryOverTasks = [
-  { title: 'Diffusion 모델 v3 학습 실행', student: '한감성', status: '진행중', weeks: 2 },
-  { title: '데이터셋 라벨링 (Phase 2)', student: '윤스마', status: '진행중', weeks: 1 },
-  { title: 'XR 프로토타입 UI 설계', student: '송리서', status: '미시작', weeks: 1 },
-]
-
-// ─── Mock Data: Student ───
 const myLastWeekSummary = { done: 3, inProgress: 2, notStarted: 0, dailyCount: 5 }
 
 const myAssignedTasks = [
@@ -58,7 +117,6 @@ const myAssignedTasks = [
   },
 ]
 
-// ─── Mock Data: External ───
 const externalWeeklySummary = [
   {
     project: 'KOCCA AI Animation Pipeline',
@@ -86,6 +144,211 @@ const taskStatusBadge: Record<string, { bg: string; color: string }> = {
   '이월': { bg: '#fef3c7', color: '#b45309' },
 }
 
+// ═══════════════════════════════════════
+// Draggable Task Card
+// ═══════════════════════════════════════
+function DraggableTaskCard({ task, isOverlay }: { task: TaskItem; isOverlay?: boolean }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.3 : 1,
+  }
+
+  const badge = typeBadgeColors[task.type]
+
+  return (
+    <div
+      ref={isOverlay ? undefined : setNodeRef}
+      style={{
+        ...style,
+        padding: '14px 16px',
+        background: '#fff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 12,
+        cursor: 'grab',
+        userSelect: 'none',
+        boxShadow: isOverlay
+          ? '0 12px 28px rgba(0,0,0,0.15), 0 4px 10px rgba(0,0,0,0.08)'
+          : '0 1px 2px rgba(0,0,0,0.04)',
+        transform: isOverlay ? 'rotate(2deg) scale(1.03)' : style.transform,
+        opacity: isOverlay ? 0.92 : style.opacity,
+        transition: isOverlay ? 'none' : style.transition,
+      }}
+      {...(isOverlay ? {} : { ...attributes, ...listeners })}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{
+          padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+          background: badge.bg, color: badge.color,
+        }}>
+          {task.type}
+        </span>
+        {task.carryOver && (
+          <span style={{
+            padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+            background: '#fef3c7', color: '#b45309',
+          }}>
+            이월
+          </span>
+        )}
+      </div>
+      <p style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>{task.title}</p>
+      <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>{task.description}</p>
+    </div>
+  )
+}
+
+// Static version for overlay
+function TaskCardOverlay({ task }: { task: TaskItem }) {
+  const badge = typeBadgeColors[task.type]
+  return (
+    <div
+      style={{
+        padding: '14px 16px',
+        background: '#fff',
+        border: '1px solid #e2e8f0',
+        borderRadius: 12,
+        cursor: 'grabbing',
+        userSelect: 'none',
+        boxShadow: '0 12px 28px rgba(0,0,0,0.15), 0 4px 10px rgba(0,0,0,0.08)',
+        transform: 'rotate(2deg) scale(1.03)',
+        opacity: 0.92,
+        width: 280,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{
+          padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+          background: badge.bg, color: badge.color,
+        }}>
+          {task.type}
+        </span>
+        {task.carryOver && (
+          <span style={{
+            padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+            background: '#fef3c7', color: '#b45309',
+          }}>
+            이월
+          </span>
+        )}
+      </div>
+      <p style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>{task.title}</p>
+      <p style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>{task.description}</p>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════
+// Droppable Zone Wrapper
+// ═══════════════════════════════════════
+function DroppableZone({ id, children, isOver }: { id: string; children: React.ReactNode; isOver?: boolean }) {
+  const { setNodeRef, isOver: over } = useDroppable({ id })
+  const active = isOver !== undefined ? isOver : over
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        minHeight: 60,
+        borderRadius: 12,
+        border: active ? '2px dashed #4f46e5' : '2px dashed transparent',
+        background: active ? 'rgba(79, 70, 229, 0.04)' : 'transparent',
+        transition: 'all 0.2s ease',
+        padding: 4,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════
+// Student Drop Card
+// ═══════════════════════════════════════
+function StudentDropCard({
+  student,
+  assignedTasks,
+  allTasks,
+}: {
+  student: StudentInfo
+  assignedTasks: string[]
+  allTasks: TaskItem[]
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `student-${student.name}` })
+
+  const tasks = assignedTasks
+    .map((tid) => allTasks.find((t) => t.id === tid))
+    .filter(Boolean) as TaskItem[]
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        ...cardStyle,
+        padding: 20,
+        border: isOver ? '2px solid #4f46e5' : '1px solid #e2e8f0',
+        background: isOver ? 'rgba(79, 70, 229, 0.02)' : '#fff',
+        transition: 'all 0.2s ease',
+      }}
+    >
+      {/* Student header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: '50%',
+          background: student.badge === '프로젝트'
+            ? 'linear-gradient(135deg, #059669, #047857)'
+            : 'linear-gradient(135deg, #4f46e5, #3730a3)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{student.name.charAt(0)}</span>
+        </div>
+        <div>
+          <p style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{student.name}</p>
+          <span style={{
+            fontSize: 11, fontWeight: 600, padding: '1px 8px', borderRadius: 6,
+            background: student.badge === '프로젝트' ? '#d1fae5' : '#e0e7ff',
+            color: student.badge === '프로젝트' ? '#047857' : '#4338ca',
+          }}>
+            {student.badge}
+          </span>
+        </div>
+        {tasks.length > 0 && (
+          <span style={{
+            marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: '#94a3b8',
+          }}>
+            {tasks.length}건
+          </span>
+        )}
+      </div>
+
+      {/* Assigned task list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {tasks.length === 0 && (
+          <p style={{
+            fontSize: 12, color: '#cbd5e1', textAlign: 'center',
+            padding: '16px 0', fontStyle: 'italic',
+          }}>
+            태스크를 여기에 드롭하세요
+          </p>
+        )}
+        {tasks.map((task) => (
+          <DraggableTaskCard key={task.id} task={task} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
 export default function Weekly() {
   const { currentRole } = useRole()
 
@@ -103,307 +366,432 @@ export default function Weekly() {
 // ═══════════════════════════════════════
 function ProfessorWeekly() {
   const [selectedWeek, setSelectedWeek] = useState(0)
-  const [assignStudent, setAssignStudent] = useState('')
-  const [taskTitle, setTaskTitle] = useState('')
-  const [taskDesc, setTaskDesc] = useState('')
-  const [taskUrl, setTaskUrl] = useState('')
-  const [taskGuide, setTaskGuide] = useState('')
   const [meetingNotes, setMeetingNotes] = useState('')
 
-  return (
-    <div>
-      {/* Header */}
-      <div style={{ marginBottom: 32 }} className="animate-fade-in">
-        <h1 style={{ fontSize: 26, fontWeight: 600, color: '#0f172a', fontFamily: 'var(--font-display)' }}>
-          주간 회의
-        </h1>
-        <p style={{ color: '#64748b', fontSize: 15, marginTop: 6, lineHeight: 1.5 }}>
-          학생별 주간 현황을 확인하고 이번 주 태스크를 배정하세요.
-        </p>
-      </div>
+  // Task pool state
+  const [allTasks, setAllTasks] = useState<TaskItem[]>([...initialPoolTasks, ...initialCarryOverTasks])
+  const [assignments, setAssignments] = useState<Record<string, string[]>>(initialAssignments)
 
-      {/* Week Selector */}
-      <div style={{ marginBottom: 28 }} className="opacity-0 animate-fade-in stagger-1">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {weekOptions.map((w, i) => (
-            <button
-              key={i}
-              onClick={() => setSelectedWeek(i)}
+  // New task form
+  const [showNewTask, setShowNewTask] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newDesc, setNewDesc] = useState('')
+  const [newUrl, setNewUrl] = useState('')
+  const [newGuide, setNewGuide] = useState('')
+  const [newType, setNewType] = useState<TaskType>('연구')
+
+  // DnD state
+  const [activeId, setActiveId] = useState<string | null>(null)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  )
+
+  // Compute which tasks are in the pool (not assigned to any student)
+  const assignedTaskIds = useMemo(() => {
+    const ids = new Set<string>()
+    Object.values(assignments).forEach((taskIds) => taskIds.forEach((id) => ids.add(id)))
+    return ids
+  }, [assignments])
+
+  const poolTasks = useMemo(
+    () => allTasks.filter((t) => !assignedTaskIds.has(t.id) && !t.carryOver),
+    [allTasks, assignedTaskIds]
+  )
+
+  const carryOverPoolTasks = useMemo(
+    () => allTasks.filter((t) => !assignedTaskIds.has(t.id) && t.carryOver),
+    [allTasks, assignedTaskIds]
+  )
+
+  const activeTask = activeId ? allTasks.find((t) => t.id === activeId) : null
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(event.active.id as string)
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    setActiveId(null)
+
+    if (!over) return
+
+    const taskId = active.id as string
+    const overId = over.id as string
+
+    // Find where the task currently lives
+    const currentOwner = Object.entries(assignments).find(([, ids]) => ids.includes(taskId))?.[0]
+
+    // Dropping on a student zone
+    if (overId.startsWith('student-')) {
+      const studentName = overId.replace('student-', '')
+
+      // Already assigned to this student
+      if (currentOwner === studentName) return
+
+      setAssignments((prev) => {
+        const next = { ...prev }
+        // Remove from previous owner
+        if (currentOwner) {
+          next[currentOwner] = next[currentOwner].filter((id) => id !== taskId)
+        }
+        // Add to new student
+        next[studentName] = [...(next[studentName] || []), taskId]
+        return next
+      })
+    }
+
+    // Dropping on the pool zone
+    if (overId === 'task-pool') {
+      if (currentOwner) {
+        setAssignments((prev) => {
+          const next = { ...prev }
+          next[currentOwner] = next[currentOwner].filter((id) => id !== taskId)
+          return next
+        })
+      }
+    }
+  }
+
+  function addNewTask() {
+    if (!newTitle.trim()) return
+    const id = `task-${Date.now()}`
+    const task: TaskItem = {
+      id,
+      title: newTitle.trim(),
+      description: newDesc.trim(),
+      type: newType,
+      url: newUrl.trim() || undefined,
+      guide: newGuide.trim() || undefined,
+    }
+    setAllTasks((prev) => [...prev, task])
+    setNewTitle('')
+    setNewDesc('')
+    setNewUrl('')
+    setNewGuide('')
+    setShowNewTask(false)
+  }
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div>
+        {/* Header */}
+        <div style={{ marginBottom: 32 }} className="animate-fade-in">
+          <h1 style={{ fontSize: 26, fontWeight: 600, color: '#0f172a', fontFamily: 'var(--font-display)' }}>
+            주간 회의
+          </h1>
+          <p style={{ color: '#64748b', fontSize: 15, marginTop: 6, lineHeight: 1.5 }}>
+            태스크를 드래그하여 학생에게 배정하세요.
+          </p>
+        </div>
+
+        {/* Week Selector */}
+        <div style={{ marginBottom: 28 }} className="opacity-0 animate-fade-in stagger-1">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {weekOptions.map((w, i) => (
+              <button
+                key={i}
+                onClick={() => setSelectedWeek(i)}
+                style={{
+                  padding: '8px 18px', borderRadius: 10,
+                  fontSize: 13, fontWeight: 500,
+                  border: 'none', cursor: 'pointer',
+                  background: selectedWeek === i ? '#4f46e5' : '#fff',
+                  color: selectedWeek === i ? '#fff' : '#64748b',
+                  boxShadow: selectedWeek === i ? '0 2px 8px rgba(79,70,229,0.25)' : '0 1px 2px rgba(0,0,0,0.05)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {w}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Student Summary Table */}
+        <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
+          <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
+            <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>지난주 학생별 요약</h3>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>자동 집계 결과</p>
+          </div>
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
+            gap: 12, padding: '12px 28px', borderBottom: '1px solid #e2e8f0',
+            background: '#f8fafc',
+          }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>학생</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>완료</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>진행중</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>미시작</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>데일리 제출</span>
+          </div>
+          {studentSummaries.map((s, idx) => (
+            <div
+              key={s.name}
               style={{
-                padding: '8px 18px', borderRadius: 10,
-                fontSize: 13, fontWeight: 500,
-                border: 'none', cursor: 'pointer',
-                background: selectedWeek === i ? '#4f46e5' : '#fff',
-                color: selectedWeek === i ? '#fff' : '#64748b',
-                boxShadow: selectedWeek === i ? '0 2px 8px rgba(79,70,229,0.25)' : '0 1px 2px rgba(0,0,0,0.05)',
-                transition: 'all 0.15s',
+                display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
+                gap: 12, padding: '16px 28px', alignItems: 'center',
+                borderBottom: idx < studentSummaries.length - 1 ? '1px solid #f1f5f9' : 'none',
+                transition: 'background 0.15s',
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
             >
-              {w}
-            </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #4f46e5, #3730a3)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                }}>
+                  <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>{s.name.charAt(0)}</span>
+                </div>
+                <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{s.name}</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: '#d1fae5', color: '#047857' }}>{s.done}</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: '#e0e7ff', color: '#4338ca' }}>{s.inProgress}</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: s.notStarted > 0 ? '#ffe4e6' : '#f1f5f9', color: s.notStarted > 0 ? '#be123c' : '#64748b' }}>{s.notStarted}</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>{s.dailyCount}/5일</span>
+              </div>
+            </div>
           ))}
         </div>
-      </div>
 
-      {/* Student Summary Table */}
-      <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
-        <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-          <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>지난주 학생별 요약</h3>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>자동 집계 결과</p>
-        </div>
-
-        {/* Table header */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
-          gap: 12, padding: '12px 28px', borderBottom: '1px solid #e2e8f0',
-          background: '#f8fafc',
-        }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>학생</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>완료</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>진행중</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>미시작</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>데일리 제출</span>
-        </div>
-
-        {studentSummaries.map((s, idx) => (
-          <div
-            key={s.name}
-            style={{
-              display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
-              gap: 12, padding: '16px 28px', alignItems: 'center',
-              borderBottom: idx < studentSummaries.length - 1 ? '1px solid #f1f5f9' : 'none',
-              transition: 'background 0.15s',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: '50%',
-                background: 'linear-gradient(135deg, #4f46e5, #3730a3)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-              }}>
-                <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>{s.name.charAt(0)}</span>
-              </div>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{s.name}</span>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: '#d1fae5', color: '#047857' }}>
-                {s.done}
-              </span>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: '#e0e7ff', color: '#4338ca' }}>
-                {s.inProgress}
-              </span>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: s.notStarted > 0 ? '#ffe4e6' : '#f1f5f9', color: s.notStarted > 0 ? '#be123c' : '#64748b' }}>
-                {s.notStarted}
-              </span>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>{s.dailyCount}/5일</span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Carry-over Tasks */}
-      <div className="opacity-0 animate-fade-in stagger-3" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
-        <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-          <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이월된 태스크</h3>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>미완료 태스크가 자동 이월되었습니다</p>
-        </div>
-        {carryOverTasks.map((task, idx) => (
-          <div
-            key={idx}
-            style={{
-              padding: '16px 28px',
-              borderBottom: idx < carryOverTasks.length - 1 ? '1px solid #f1f5f9' : 'none',
+        {/* ═══ Drag & Drop Area: Task Pool (left) + Students (right) ═══ */}
+        <div
+          className="opacity-0 animate-fade-in stagger-3 weekly-dnd-layout"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 24,
+            marginBottom: 28,
+            alignItems: 'start',
+          }}
+        >
+          {/* Left: Task Pool */}
+          <div style={{ ...cardStyle, overflow: 'hidden' }}>
+            <div style={{
+              padding: '20px 24px', borderBottom: '1px solid #f1f5f9',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              transition: 'background 0.15s',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-          >
-            <div>
-              <p style={{ fontSize: 14, fontWeight: 500, color: '#0f172a' }}>{task.title}</p>
-              <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 3 }}>
-                담당: {task.student} · {task.weeks}주차 연속
-              </p>
-            </div>
-            <span style={{
-              padding: '4px 12px', borderRadius: 99,
-              fontSize: 12, fontWeight: 600,
-              background: taskStatusBadge[task.status]?.bg || '#f1f5f9',
-              color: taskStatusBadge[task.status]?.color || '#64748b',
             }}>
-              {task.status}
-            </span>
-          </div>
-        ))}
-      </div>
+              <div>
+                <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>태스크 풀</h3>
+                <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>드래그하여 학생에게 배정</p>
+              </div>
+              <button
+                onClick={() => setShowNewTask(!showNewTask)}
+                style={{
+                  padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  border: 'none', cursor: 'pointer',
+                  background: showNewTask ? '#f1f5f9' : '#4f46e5',
+                  color: showNewTask ? '#64748b' : '#fff',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {showNewTask ? '취소' : '+ 새 태스크 추가'}
+              </button>
+            </div>
 
-      {/* Task Assignment Form */}
-      <div className="opacity-0 animate-fade-in stagger-4" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
-        <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-          <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 태스크 배정</h3>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>학생에게 새 태스크를 배정합니다</p>
+            {/* New Task Inline Form */}
+            {showNewTask && (
+              <div style={{
+                padding: '20px 24px', borderBottom: '1px solid #f1f5f9',
+                background: '#f8fafc',
+                display: 'flex', flexDirection: 'column', gap: 12,
+              }}>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <select
+                    value={newType}
+                    onChange={(e) => setNewType(e.target.value as TaskType)}
+                    style={{
+                      padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
+                      fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
+                    }}
+                  >
+                    <option value="연구">연구</option>
+                    <option value="논문리뷰">논문리뷰</option>
+                    <option value="개발">개발</option>
+                    <option value="기타">기타</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="태스크 제목"
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #e2e8f0', fontSize: 13,
+                      background: '#fff', color: '#0f172a', outline: 'none',
+                    }}
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={newDesc}
+                  onChange={(e) => setNewDesc(e.target.value)}
+                  placeholder="설명"
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8,
+                    border: '1px solid #e2e8f0', fontSize: 13,
+                    background: '#fff', color: '#0f172a', outline: 'none',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <input
+                    type="url"
+                    value={newUrl}
+                    onChange={(e) => setNewUrl(e.target.value)}
+                    placeholder="URL (선택)"
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #e2e8f0', fontSize: 13,
+                      background: '#fff', color: '#0f172a', outline: 'none',
+                    }}
+                  />
+                  <input
+                    type="text"
+                    value={newGuide}
+                    onChange={(e) => setNewGuide(e.target.value)}
+                    placeholder="가이드 (선택)"
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #e2e8f0', fontSize: 13,
+                      background: '#fff', color: '#0f172a', outline: 'none',
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={addNewTask}
+                  style={{
+                    padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    border: 'none', cursor: 'pointer', alignSelf: 'flex-end',
+                    background: '#4f46e5', color: '#fff',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#3730a3' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = '#4f46e5' }}
+                >
+                  추가
+                </button>
+              </div>
+            )}
+
+            {/* Pool tasks */}
+            <DroppableZone id="task-pool">
+              <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {poolTasks.length === 0 && carryOverPoolTasks.length === 0 && (
+                  <p style={{ fontSize: 13, color: '#cbd5e1', textAlign: 'center', padding: '20px 0', fontStyle: 'italic' }}>
+                    모든 태스크가 배정되었습니다
+                  </p>
+                )}
+
+                {poolTasks.map((task) => (
+                  <DraggableTaskCard key={task.id} task={task} />
+                ))}
+
+                {/* Carry-over section */}
+                {carryOverPoolTasks.length > 0 && (
+                  <>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      marginTop: poolTasks.length > 0 ? 8 : 0,
+                    }}>
+                      <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#b45309', whiteSpace: 'nowrap' }}>
+                        이월된 태스크
+                      </span>
+                      <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
+                    </div>
+                    {carryOverPoolTasks.map((task) => (
+                      <DraggableTaskCard key={task.id} task={task} />
+                    ))}
+                  </>
+                )}
+              </div>
+            </DroppableZone>
+          </div>
+
+          {/* Right: Students */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ padding: '0 0 4px 0' }}>
+              <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>학생</h3>
+              <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>태스크를 드롭하여 배정</p>
+            </div>
+            {mockStudents.map((student) => (
+              <StudentDropCard
+                key={student.name}
+                student={student}
+                assignedTasks={assignments[student.name] || []}
+                allTasks={allTasks}
+              />
+            ))}
+          </div>
         </div>
-        <div style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* Student select */}
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 6 }}>학생 선택</label>
-            <select
-              value={assignStudent}
-              onChange={(e) => setAssignStudent(e.target.value)}
-              style={{
-                width: '100%', maxWidth: 320,
-                padding: '10px 14px', borderRadius: 10,
-                border: '1px solid #e2e8f0', background: '#fff',
-                fontSize: 14, color: '#0f172a', outline: 'none',
-              }}
-            >
-              <option value="">학생을 선택하세요</option>
-              {adviseeStudents.map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          </div>
 
-          {/* Title */}
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 6 }}>태스크 제목</label>
-            <input
-              type="text"
-              value={taskTitle}
-              onChange={(e) => setTaskTitle(e.target.value)}
-              placeholder="예: StyleGAN3 논문 리뷰"
-              style={{
-                width: '100%', padding: '10px 14px', borderRadius: 10,
-                border: '1px solid #e2e8f0', background: '#fff',
-                fontSize: 14, color: '#0f172a', outline: 'none',
-              }}
-            />
+        {/* Meeting Notes */}
+        <div className="opacity-0 animate-fade-in stagger-4" style={{ ...cardStyle, overflow: 'hidden' }}>
+          <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
+            <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>회의록</h3>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>이번 주 회의 내용을 기록하세요</p>
           </div>
-
-          {/* Description */}
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 6 }}>설명</label>
+          <div style={{ padding: 28 }}>
             <textarea
-              value={taskDesc}
-              onChange={(e) => setTaskDesc(e.target.value)}
-              placeholder="태스크에 대한 상세 설명..."
-              rows={3}
+              value={meetingNotes}
+              onChange={(e) => setMeetingNotes(e.target.value)}
+              placeholder="회의 내용을 자유롭게 기록하세요..."
+              rows={6}
               style={{
-                width: '100%', padding: '10px 14px', borderRadius: 10,
-                border: '1px solid #e2e8f0', background: '#fff',
+                width: '100%', padding: '14px', borderRadius: 12,
+                border: '1px solid #e2e8f0', background: '#f8fafc',
                 fontSize: 14, color: '#0f172a', outline: 'none',
                 resize: 'vertical' as const, fontFamily: 'inherit',
+                lineHeight: 1.7,
               }}
             />
-          </div>
-
-          {/* URL + Guide side by side */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }} className="weekly-form-row">
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 6 }}>참고 URL</label>
-              <input
-                type="url"
-                value={taskUrl}
-                onChange={(e) => setTaskUrl(e.target.value)}
-                placeholder="https://..."
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+              <button
                 style={{
-                  width: '100%', padding: '10px 14px', borderRadius: 10,
-                  border: '1px solid #e2e8f0', background: '#fff',
-                  fontSize: 14, color: '#0f172a', outline: 'none',
+                  padding: '10px 24px', borderRadius: 10,
+                  fontSize: 14, fontWeight: 600,
+                  border: 'none', cursor: 'pointer',
+                  background: '#059669', color: '#fff',
+                  boxShadow: '0 2px 8px rgba(5,150,105,0.25)',
+                  transition: 'all 0.15s',
                 }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 600, color: '#334155', display: 'block', marginBottom: 6 }}>접근법 가이드</label>
-              <input
-                type="text"
-                value={taskGuide}
-                onChange={(e) => setTaskGuide(e.target.value)}
-                placeholder="예: Section 3 중심으로 읽기"
-                style={{
-                  width: '100%', padding: '10px 14px', borderRadius: 10,
-                  border: '1px solid #e2e8f0', background: '#fff',
-                  fontSize: 14, color: '#0f172a', outline: 'none',
-                }}
-              />
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#047857' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = '#059669' }}
+              >
+                저장
+              </button>
             </div>
           </div>
-
-          {/* Assign Button */}
-          <div>
-            <button
-              style={{
-                padding: '10px 28px', borderRadius: 10,
-                fontSize: 14, fontWeight: 600,
-                border: 'none', cursor: 'pointer',
-                background: '#4f46e5', color: '#fff',
-                boxShadow: '0 2px 8px rgba(79,70,229,0.25)',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#3730a3' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = '#4f46e5' }}
-            >
-              배정
-            </button>
-          </div>
         </div>
-      </div>
 
-      {/* Meeting Notes */}
-      <div className="opacity-0 animate-fade-in stagger-5" style={{ ...cardStyle, overflow: 'hidden' }}>
-        <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-          <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>회의록</h3>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>이번 주 회의 내용을 기록하세요</p>
-        </div>
-        <div style={{ padding: 28 }}>
-          <textarea
-            value={meetingNotes}
-            onChange={(e) => setMeetingNotes(e.target.value)}
-            placeholder="회의 내용을 자유롭게 기록하세요..."
-            rows={6}
-            style={{
-              width: '100%', padding: '14px', borderRadius: 12,
-              border: '1px solid #e2e8f0', background: '#f8fafc',
-              fontSize: 14, color: '#0f172a', outline: 'none',
-              resize: 'vertical' as const, fontFamily: 'inherit',
-              lineHeight: 1.7,
-            }}
-          />
-          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
-            <button
-              style={{
-                padding: '10px 24px', borderRadius: 10,
-                fontSize: 14, fontWeight: 600,
-                border: 'none', cursor: 'pointer',
-                background: '#059669', color: '#fff',
-                boxShadow: '0 2px 8px rgba(5,150,105,0.25)',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#047857' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = '#059669' }}
-            >
-              저장
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <style>{`
-        @media (max-width: 640px) {
-          .weekly-form-row {
-            grid-template-columns: 1fr !important;
+        <style>{`
+          @media (max-width: 900px) {
+            .weekly-dnd-layout {
+              grid-template-columns: 1fr !important;
+            }
           }
-        }
-      `}</style>
-    </div>
+        `}</style>
+      </div>
+
+      {/* Drag Overlay */}
+      <DragOverlay>
+        {activeTask ? <TaskCardOverlay task={activeTask} /> : null}
+      </DragOverlay>
+    </DndContext>
   )
 }
 
