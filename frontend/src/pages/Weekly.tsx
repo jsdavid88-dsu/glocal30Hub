@@ -34,12 +34,21 @@ interface TaskItem {
   url?: string
   guide?: string
   carryOver?: boolean
+  project?: string
 }
 
 interface StudentInfo {
   name: string
   badge: '지도학생' | '프로젝트'
+  project?: string
 }
+
+// ─── Project definitions ───
+const projectList = [
+  'KOCCA AI Animation Pipeline',
+  'NRF GCA Narratology',
+  'Digital Heritage Archive',
+]
 
 // ─── Mock Data ───
 // Mock marked dates for the mini calendar (weeks with entries)
@@ -80,11 +89,13 @@ const initialCarryOverTasks: TaskItem[] = [
 ]
 
 const mockStudents: StudentInfo[] = [
-  { name: '한감성', badge: '지도학생' },
-  { name: '윤스마', badge: '지도학생' },
-  { name: '정인턴', badge: '지도학생' },
-  { name: '강데이', badge: '지도학생' },
-  { name: '박프로', badge: '프로젝트' },
+  { name: '한감성', badge: '지도학생', project: 'KOCCA AI Animation Pipeline' },
+  { name: '윤스마', badge: '지도학생', project: 'Digital Heritage Archive' },
+  { name: '정인턴', badge: '지도학생', project: 'KOCCA AI Animation Pipeline' },
+  { name: '강데이', badge: '지도학생', project: 'NRF GCA Narratology' },
+  { name: '박프로', badge: '프로젝트', project: 'KOCCA AI Animation Pipeline' },
+  { name: '임연구', badge: '프로젝트', project: 'NRF GCA Narratology' },
+  { name: '송리서', badge: '지도학생' },
 ]
 
 // carry-1 starts assigned to 한감성
@@ -94,6 +105,8 @@ const initialAssignments: Record<string, string[]> = {
   '정인턴': [],
   '강데이': [],
   '박프로': [],
+  '임연구': [],
+  '송리서': [],
 }
 
 const typeBadgeColors: Record<TaskType, { bg: string; color: string }> = {
@@ -105,10 +118,11 @@ const typeBadgeColors: Record<TaskType, { bg: string; color: string }> = {
 
 // ─── Student/External Mock Data ───
 const studentSummaries = [
-  { name: '한감성', done: 3, inProgress: 2, notStarted: 0, dailyCount: 5 },
-  { name: '윤스마', done: 1, inProgress: 1, notStarted: 2, dailyCount: 3 },
-  { name: '정인턴', done: 2, inProgress: 1, notStarted: 1, dailyCount: 4 },
-  { name: '강데이', done: 4, inProgress: 0, notStarted: 0, dailyCount: 5 },
+  { name: '한감성', done: 3, inProgress: 2, notStarted: 0, dailyCount: 5, project: 'KOCCA AI Animation Pipeline' },
+  { name: '윤스마', done: 1, inProgress: 1, notStarted: 2, dailyCount: 3, project: 'Digital Heritage Archive' },
+  { name: '정인턴', done: 2, inProgress: 1, notStarted: 1, dailyCount: 4, project: 'KOCCA AI Animation Pipeline' },
+  { name: '강데이', done: 4, inProgress: 0, notStarted: 0, dailyCount: 5, project: 'NRF GCA Narratology' },
+  { name: '임연구', done: 2, inProgress: 1, notStarted: 0, dailyCount: 4, project: 'NRF GCA Narratology' },
   { name: '송리서', done: 0, inProgress: 2, notStarted: 1, dailyCount: 2 },
 ]
 
@@ -122,6 +136,7 @@ const myAssignedTasks = [
     guide: 'Section 3 중심으로 읽고, 기존 StyleGAN2 대비 변경점 정리',
     status: '진행중' as const,
     assignedBy: '김교수',
+    project: 'KOCCA AI Animation Pipeline',
   },
   {
     title: '모델 A 벤치마크 실행',
@@ -130,6 +145,7 @@ const myAssignedTasks = [
     guide: 'GPU 서버 3번에서 실행. batch_size=64, epochs=100',
     status: '새로 배정' as const,
     assignedBy: '김교수',
+    project: 'KOCCA AI Animation Pipeline',
   },
   {
     title: '중간보고서 Section 2 작성',
@@ -138,6 +154,7 @@ const myAssignedTasks = [
     guide: 'Overleaf 프로젝트에서 작업. 3/14까지 초안 완성',
     status: '이월' as const,
     assignedBy: '김교수',
+    project: 'NRF GCA Narratology',
   },
 ]
 
@@ -166,6 +183,114 @@ const taskStatusBadge: Record<string, { bg: string; color: string }> = {
   '미시작': { bg: '#f1f5f9', color: '#64748b' },
   '새로 배정': { bg: '#e0e7ff', color: '#4338ca' },
   '이월': { bg: '#fef3c7', color: '#b45309' },
+}
+
+// ═══════════════════════════════════════
+// Collapsible Section
+// ═══════════════════════════════════════
+function CollapsibleSection({
+  title,
+  icon,
+  subtitle,
+  defaultOpen = true,
+  children,
+  headerStyle,
+}: {
+  title: string
+  icon?: string
+  subtitle?: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+  headerStyle?: React.CSSProperties
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '12px 16px',
+          background: '#f1f5f9',
+          borderRadius: 10,
+          cursor: 'pointer',
+          userSelect: 'none',
+          transition: 'background 0.15s',
+          ...headerStyle,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = '#e2e8f0' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = headerStyle?.background as string || '#f1f5f9' }}
+      >
+        {icon && <span style={{ fontSize: 16 }}>{icon}</span>}
+        <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', flex: 1 }}>{title}</span>
+        {subtitle && (
+          <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>{subtitle}</span>
+        )}
+        <svg
+          style={{
+            width: 16, height: 16, color: '#94a3b8',
+            transition: 'transform 0.2s',
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+          }}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+      <div
+        style={{
+          overflow: 'hidden',
+          maxHeight: open ? '2000px' : '0px',
+          transition: 'max-height 0.35s ease',
+        }}
+      >
+        <div style={{ paddingTop: 8 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════
+// View Toggle
+// ═══════════════════════════════════════
+function ViewToggle({ options, value, onChange }: {
+  options: { value: string; label: string }[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div style={{
+      display: 'inline-flex',
+      border: '1px solid #e2e8f0',
+      borderRadius: 8,
+      overflow: 'hidden',
+      background: '#f8fafc',
+    }}>
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          style={{
+            padding: '6px 14px',
+            fontSize: 12,
+            fontWeight: 600,
+            border: 'none',
+            cursor: 'pointer',
+            background: value === opt.value ? '#4f46e5' : 'transparent',
+            color: value === opt.value ? '#fff' : '#64748b',
+            transition: 'all 0.15s',
+          }}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 // ═══════════════════════════════════════
@@ -394,6 +519,12 @@ function ProfessorWeekly() {
   const handleWeekSelect = useCallback((d: Date) => setSelectedDate(d), [])
   const [meetingNotes, setMeetingNotes] = useState('')
 
+  // Summary view mode
+  const [summaryView, setSummaryView] = useState<'project' | 'all'>('project')
+
+  // Project filter for DnD
+  const [dndProjectFilter, setDndProjectFilter] = useState<string>('전체')
+
   // Task pool state
   const [allTasks, setAllTasks] = useState<TaskItem[]>([...initialPoolTasks, ...initialCarryOverTasks])
   const [assignments, setAssignments] = useState<Record<string, string[]>>(initialAssignments)
@@ -431,6 +562,25 @@ function ProfessorWeekly() {
   )
 
   const activeTask = activeId ? allTasks.find((t) => t.id === activeId) : null
+
+  // Group students by project for DnD filter
+  const filteredStudents = useMemo(() => {
+    if (dndProjectFilter === '전체') return mockStudents
+    if (dndProjectFilter === '프로젝트 미배정') return mockStudents.filter(s => !s.project)
+    return mockStudents.filter(s => s.project === dndProjectFilter)
+  }, [dndProjectFilter])
+
+  // Group student summaries by project
+  const projectGroupedSummaries = useMemo(() => {
+    const groups: { project: string; students: typeof studentSummaries }[] = []
+    for (const proj of projectList) {
+      const students = studentSummaries.filter(s => s.project === proj)
+      if (students.length > 0) groups.push({ project: proj, students })
+    }
+    const unassigned = studentSummaries.filter(s => !s.project)
+    if (unassigned.length > 0) groups.push({ project: '프로젝트 미배정', students: unassigned })
+    return groups
+  }, [])
 
   function handleDragStart(event: DragStartEvent) {
     setActiveId(event.active.id as string)
@@ -498,6 +648,59 @@ function ProfessorWeekly() {
     setShowNewTask(false)
   }
 
+  // Render summary table header row
+  const summaryHeaderRow = (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
+      gap: 12, padding: '12px 28px', borderBottom: '1px solid #e2e8f0',
+      background: '#f8fafc',
+    }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>학생</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>완료</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>진행중</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>미시작</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>데일리 제출</span>
+    </div>
+  )
+
+  // Render a single student row
+  const renderStudentRow = (s: typeof studentSummaries[0], idx: number, total: number) => (
+    <div
+      key={s.name}
+      style={{
+        display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
+        gap: 12, padding: '16px 28px', alignItems: 'center',
+        borderBottom: idx < total - 1 ? '1px solid #f1f5f9' : 'none',
+        transition: 'background 0.15s',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #4f46e5, #3730a3)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>{s.name.charAt(0)}</span>
+        </div>
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{s.name}</span>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: '#d1fae5', color: '#047857' }}>{s.done}</span>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: '#e0e7ff', color: '#4338ca' }}>{s.inProgress}</span>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: s.notStarted > 0 ? '#ffe4e6' : '#f1f5f9', color: s.notStarted > 0 ? '#be123c' : '#64748b' }}>{s.notStarted}</span>
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>{s.dailyCount}/5일</span>
+      </div>
+    </div>
+  )
+
   return (
     <DndContext
       sensors={sensors}
@@ -541,57 +744,50 @@ function ProfessorWeekly() {
 
         {/* Student Summary Table */}
         <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
-          <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-            <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>지난주 학생별 요약</h3>
-            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>자동 집계 결과</p>
-          </div>
-          <div style={{
-            display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
-            gap: 12, padding: '12px 28px', borderBottom: '1px solid #e2e8f0',
-            background: '#f8fafc',
-          }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>학생</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>완료</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>진행중</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>미시작</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' as const, letterSpacing: '0.05em', textAlign: 'center' as const }}>데일리 제출</span>
-          </div>
-          {studentSummaries.map((s, idx) => (
-            <div
-              key={s.name}
-              style={{
-                display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr',
-                gap: 12, padding: '16px 28px', alignItems: 'center',
-                borderBottom: idx < studentSummaries.length - 1 ? '1px solid #f1f5f9' : 'none',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: '50%',
-                  background: 'linear-gradient(135deg, #4f46e5, #3730a3)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                }}>
-                  <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>{s.name.charAt(0)}</span>
-                </div>
-                <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{s.name}</span>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: '#d1fae5', color: '#047857' }}>{s.done}</span>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: '#e0e7ff', color: '#4338ca' }}>{s.inProgress}</span>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 13, fontWeight: 600, background: s.notStarted > 0 ? '#ffe4e6' : '#f1f5f9', color: s.notStarted > 0 ? '#be123c' : '#64748b' }}>{s.notStarted}</span>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>{s.dailyCount}/5일</span>
-              </div>
+          <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>지난주 학생별 요약</h3>
+              <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>자동 집계 결과</p>
             </div>
-          ))}
+            <ViewToggle
+              options={[
+                { value: 'project', label: '프로젝트별 보기' },
+                { value: 'all', label: '전체 보기' },
+              ]}
+              value={summaryView}
+              onChange={(v) => setSummaryView(v as 'project' | 'all')}
+            />
+          </div>
+
+          {summaryView === 'all' ? (
+            <>
+              {summaryHeaderRow}
+              {studentSummaries.map((s, idx) => renderStudentRow(s, idx, studentSummaries.length))}
+            </>
+          ) : (
+            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {projectGroupedSummaries.map((group) => {
+                const totalDone = group.students.reduce((a, s) => a + s.done, 0)
+                const totalInProgress = group.students.reduce((a, s) => a + s.inProgress, 0)
+                const totalNotStarted = group.students.reduce((a, s) => a + s.notStarted, 0)
+                const subtitle = `완료 ${totalDone} / 진행 ${totalInProgress} / 미시작 ${totalNotStarted}`
+                return (
+                  <CollapsibleSection
+                    key={group.project}
+                    title={group.project}
+                    icon={group.project === '프로젝트 미배정' ? undefined : '\uD83D\uDCC1'}
+                    subtitle={subtitle}
+                    defaultOpen={true}
+                  >
+                    <div style={{ ...cardStyle, overflow: 'hidden' }}>
+                      {summaryHeaderRow}
+                      {group.students.map((s, idx) => renderStudentRow(s, idx, group.students.length))}
+                    </div>
+                  </CollapsibleSection>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* ═══ Drag & Drop Area: Task Pool (left) + Students (right) ═══ */}
@@ -750,11 +946,28 @@ function ProfessorWeekly() {
 
           {/* Right: Students */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ padding: '0 0 4px 0' }}>
-              <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>학생</h3>
-              <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>태스크를 드롭하여 배정</p>
+            <div style={{ padding: '0 0 4px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>학생</h3>
+                <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>태스크를 드롭하여 배정</p>
+              </div>
+              <select
+                value={dndProjectFilter}
+                onChange={(e) => setDndProjectFilter(e.target.value)}
+                style={{
+                  padding: '6px 10px', borderRadius: 8,
+                  border: '1px solid #e2e8f0', fontSize: 12, color: '#0f172a',
+                  background: '#fff', outline: 'none', cursor: 'pointer',
+                }}
+              >
+                <option value="전체">전체</option>
+                {projectList.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+                <option value="프로젝트 미배정">프로젝트 미배정</option>
+              </select>
             </div>
-            {mockStudents.map((student) => (
+            {filteredStudents.map((student) => (
               <StudentDropCard
                 key={student.name}
                 student={student}
@@ -826,6 +1039,76 @@ function ProfessorWeekly() {
 // ═══════════════════════════════════════
 function StudentWeekly() {
   const [weekPlan, setWeekPlan] = useState('')
+  const [taskView, setTaskView] = useState<'project' | 'all'>('project')
+
+  // Group assigned tasks by project
+  const projectGroupedTasks = useMemo(() => {
+    const groups: { project: string; tasks: typeof myAssignedTasks }[] = []
+    const projectMap = new Map<string, typeof myAssignedTasks>()
+    for (const task of myAssignedTasks) {
+      const proj = task.project || '프로젝트 없음'
+      if (!projectMap.has(proj)) projectMap.set(proj, [])
+      projectMap.get(proj)!.push(task)
+    }
+    for (const [project, tasks] of projectMap) {
+      groups.push({ project, tasks })
+    }
+    return groups
+  }, [])
+
+  const renderTaskCard = (task: typeof myAssignedTasks[0], idx: number, total: number) => {
+    const badge = taskStatusBadge[task.status] || taskStatusBadge['미시작']
+    return (
+      <div
+        key={idx}
+        style={{
+          padding: '24px 28px',
+          borderBottom: idx < total - 1 ? '1px solid #f1f5f9' : 'none',
+          transition: 'background 0.15s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+          <h4 style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>{task.title}</h4>
+          <span style={{
+            padding: '4px 12px', borderRadius: 99, fontSize: 12, fontWeight: 600,
+            background: badge.bg, color: badge.color, flexShrink: 0,
+          }}>
+            {task.status}
+          </span>
+        </div>
+        <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 12 }}>{task.description}</p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {task.url && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <svg style={{ width: 14, height: 14, color: '#94a3b8', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              <a href={task.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#4f46e5', textDecoration: 'none' }}>
+                {task.url}
+              </a>
+            </div>
+          )}
+          {task.guide && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <svg style={{ width: 14, height: 14, color: '#94a3b8', flexShrink: 0, marginTop: 2 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              <span style={{ fontSize: 13, color: '#475569', fontStyle: 'italic' }}>가이드: {task.guide}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+            <svg style={{ width: 14, height: 14, color: '#94a3b8', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>배정: {task.assignedBy}</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -858,64 +1141,42 @@ function StudentWeekly() {
 
       {/* Assigned Tasks */}
       <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
-        <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-          <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 배정된 태스크</h3>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>{myAssignedTasks.length}건 배정됨</p>
+        <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 배정된 태스크</h3>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>{myAssignedTasks.length}건 배정됨</p>
+          </div>
+          {projectGroupedTasks.length > 1 && (
+            <ViewToggle
+              options={[
+                { value: 'project', label: '프로젝트별' },
+                { value: 'all', label: '전체 보기' },
+              ]}
+              value={taskView}
+              onChange={(v) => setTaskView(v as 'project' | 'all')}
+            />
+          )}
         </div>
 
-        {myAssignedTasks.map((task, idx) => {
-          const badge = taskStatusBadge[task.status] || taskStatusBadge['미시작']
-          return (
-            <div
-              key={idx}
-              style={{
-                padding: '24px 28px',
-                borderBottom: idx < myAssignedTasks.length - 1 ? '1px solid #f1f5f9' : 'none',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                <h4 style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>{task.title}</h4>
-                <span style={{
-                  padding: '4px 12px', borderRadius: 99, fontSize: 12, fontWeight: 600,
-                  background: badge.bg, color: badge.color, flexShrink: 0,
-                }}>
-                  {task.status}
-                </span>
-              </div>
-              <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 12 }}>{task.description}</p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {task.url && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <svg style={{ width: 14, height: 14, color: '#94a3b8', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                    <a href={task.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#4f46e5', textDecoration: 'none' }}>
-                      {task.url}
-                    </a>
-                  </div>
-                )}
-                {task.guide && (
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    <svg style={{ width: 14, height: 14, color: '#94a3b8', flexShrink: 0, marginTop: 2 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                    </svg>
-                    <span style={{ fontSize: 13, color: '#475569', fontStyle: 'italic' }}>가이드: {task.guide}</span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                  <svg style={{ width: 14, height: 14, color: '#94a3b8', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                  <span style={{ fontSize: 12, color: '#94a3b8' }}>배정: {task.assignedBy}</span>
+        {taskView === 'all' || projectGroupedTasks.length <= 1 ? (
+          myAssignedTasks.map((task, idx) => renderTaskCard(task, idx, myAssignedTasks.length))
+        ) : (
+          <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {projectGroupedTasks.map((group) => (
+              <CollapsibleSection
+                key={group.project}
+                title={group.project}
+                icon={group.project === '프로젝트 없음' ? undefined : '\uD83D\uDCC1'}
+                subtitle={`${group.tasks.length}건`}
+                defaultOpen={true}
+              >
+                <div style={{ ...cardStyle, overflow: 'hidden' }}>
+                  {group.tasks.map((task, idx) => renderTaskCard(task, idx, group.tasks.length))}
                 </div>
-              </div>
-            </div>
-          )
-        })}
+              </CollapsibleSection>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Week Plan */}

@@ -60,6 +60,46 @@ const mockEntries = [
       { section: '오늘 할 일', content: 'KOCCA 2차년도 중간평가 발표자료 준비. 데모 영상 편집 및 성과 지표 정리.', tags: ['평가', '발표'] },
     ],
   },
+  {
+    id: 5,
+    author: '정인턴',
+    authorRole: 'student',
+    date: '2026-03-11',
+    project: 'KOCCA AI Animation Pipeline',
+    projectCode: 'KOCCA-2025-001',
+    visibility: '프로젝트 공개',
+    isAdvisee: true,
+    blocks: [
+      { section: '어제 한 일', content: '캐릭터 리깅 자동화 스크립트 v3 테스트 완료. 관절 인식률 92% 달성.', tags: ['Animation', 'Rigging'] },
+      { section: '오늘 할 일', content: '리깅 결과물 Diffusion 모듈과 통합 테스트 진행 예정.', tags: ['Pipeline', 'Integration'] },
+    ],
+  },
+  {
+    id: 6,
+    author: '임연구',
+    authorRole: 'student',
+    date: '2026-03-11',
+    project: 'NRF GCA Narratology',
+    projectCode: 'NRF-2025-042',
+    visibility: '내부 공개',
+    isAdvisee: true,
+    blocks: [
+      { section: '어제 한 일', content: 'GCA 코퍼스 전처리 파이프라인 구축. 총 1,200편 서사 텍스트 토큰화 완료.', tags: ['NLP', 'Data'] },
+      { section: '이슈/논의', content: '저작권 이슈로 일부 텍스트 제외 필요. 법무팀 확인 중.', tags: ['법무'] },
+    ],
+  },
+  {
+    id: 7,
+    author: '송리서',
+    authorRole: 'student',
+    date: '2026-03-10',
+    visibility: '내부 공개',
+    isAdvisee: true,
+    blocks: [
+      { section: '오늘 할 일', content: '연구 주제 탐색: 생성형 AI 기반 인터랙티브 스토리텔링 관련 선행연구 서베이.', tags: ['서베이', 'AI'] },
+      { section: '기타', content: '다음 주 랩 세미나 발표 준비 시작.', tags: ['세미나'] },
+    ],
+  },
 ]
 
 // External can only see project-scope blocks from assigned projects
@@ -105,6 +145,109 @@ function formatDateLabel(d: Date): string {
   return `${y}년 ${m}월 ${day}일 (${weekdays[d.getDay()]})`
 }
 
+// ═══════════════════════════════════════
+// View Toggle
+// ═══════════════════════════════════════
+function ViewToggle({ options, value, onChange }: {
+  options: { value: string; label: string }[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div style={{
+      display: 'inline-flex',
+      border: '1px solid #e2e8f0',
+      borderRadius: 8,
+      overflow: 'hidden',
+      background: '#f8fafc',
+    }}>
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          style={{
+            padding: '6px 14px',
+            fontSize: 12,
+            fontWeight: 600,
+            border: 'none',
+            cursor: 'pointer',
+            background: value === opt.value ? '#4f46e5' : 'transparent',
+            color: value === opt.value ? '#fff' : '#64748b',
+            transition: 'all 0.15s',
+          }}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════
+// Collapsible Project Section
+// ═══════════════════════════════════════
+function CollapsibleProjectSection({
+  title,
+  icon,
+  count,
+  defaultOpen = true,
+  children,
+}: {
+  title: string
+  icon?: string
+  count: number
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '12px 16px',
+          background: '#f1f5f9',
+          borderRadius: 10,
+          cursor: 'pointer',
+          userSelect: 'none',
+          transition: 'background 0.15s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = '#e2e8f0' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = '#f1f5f9' }}
+      >
+        {icon && <span style={{ fontSize: 16 }}>{icon}</span>}
+        <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', flex: 1 }}>{title}</span>
+        <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>{count}건</span>
+        <svg
+          style={{
+            width: 16, height: 16, color: '#94a3b8',
+            transition: 'transform 0.2s',
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+          }}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+      <div
+        style={{
+          overflow: 'hidden',
+          maxHeight: open ? '5000px' : '0px',
+          transition: 'max-height 0.35s ease',
+        }}
+      >
+        <div style={{ paddingTop: 8, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function DailyFeed() {
   const { currentRole } = useRole()
   const [selectedDate, setSelectedDate] = useState(new Date(2026, 2, 12))
@@ -115,6 +258,7 @@ export default function DailyFeed() {
   const [filterAuthor, setFilterAuthor] = useState('')
   const [filterProject, setFilterProject] = useState('')
   const [filterSection, setFilterSection] = useState('')
+  const [feedView, setFeedView] = useState<'time' | 'project'>('time')
 
   const toggleEntry = (id: number) => {
     setExpandedEntries((prev) => {
@@ -137,7 +281,7 @@ export default function DailyFeed() {
     }
     if (currentRole === 'external') {
       // External sees only project-scope blocks from assigned projects
-      return entry.visibility === '프로젝트 공개' && externalAssignedProjects.includes(entry.projectCode)
+      return entry.visibility === '프로젝트 공개' && externalAssignedProjects.includes(entry.projectCode || '')
     }
     return true
   })
@@ -150,14 +294,139 @@ export default function DailyFeed() {
     return true
   })
 
+  // Group entries by project
+  const projectGroupedEntries = useMemo(() => {
+    const groups: { project: string; projectCode: string; entries: typeof filteredEntries }[] = []
+    const projectMap = new Map<string, typeof filteredEntries>()
+    const projectNames = new Map<string, string>()
+
+    for (const entry of filteredEntries) {
+      const code = entry.projectCode || '__none__'
+      const name = entry.project || '프로젝트 없음'
+      if (!projectMap.has(code)) {
+        projectMap.set(code, [])
+        projectNames.set(code, name)
+      }
+      projectMap.get(code)!.push(entry)
+    }
+
+    // Named projects first, then unassigned
+    for (const [code, entries] of projectMap) {
+      if (code !== '__none__') {
+        groups.push({ project: projectNames.get(code)!, projectCode: code, entries })
+      }
+    }
+    if (projectMap.has('__none__')) {
+      groups.push({ project: '프로젝트 없음', projectCode: '__none__', entries: projectMap.get('__none__')! })
+    }
+
+    return groups
+  }, [filteredEntries])
+
   // Build author options from visible entries
   const visibleAuthors = [...new Set(roleFilteredEntries.map(e => e.author))]
-  const visibleProjects = [...new Set(roleFilteredEntries.map(e => ({ code: e.projectCode, name: e.project })).map(p => JSON.stringify(p)))].map(p => JSON.parse(p))
+  const visibleProjects = [...new Set(roleFilteredEntries.map(e => ({ code: e.projectCode || '', name: e.project || '' })).filter(p => p.code).map(p => JSON.stringify(p)))].map(p => JSON.parse(p))
 
   const roleDescription: Record<string, string> = {
     professor: '지도학생들의 연구 활동을 확인합니다.',
     student: '내 데일리와 프로젝트 공유 항목을 확인합니다.',
     external: '참여 프로젝트의 공개 활동을 확인합니다.',
+  }
+
+  // Render a single entry card
+  const renderEntryCard = (entry: typeof mockEntries[0], i: number) => {
+    const expanded = expandedEntries.has(entry.id)
+    const visibleBlocks = currentRole === 'external'
+      ? entry.blocks.filter(b => b.section !== '기타')
+      : entry.blocks
+
+    return (
+      <div
+        key={entry.id}
+        className={`opacity-0 animate-fade-in stagger-${Math.min(i + 2, 6)}`}
+        style={{ ...cardStyle, overflow: 'hidden' }}
+      >
+        {/* Entry Header */}
+        <div
+          onClick={() => toggleEntry(entry.id)}
+          style={{
+            padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            cursor: 'pointer', transition: 'background 0.15s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #4f46e5, #3730a3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{entry.author.charAt(0)}</span>
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{entry.author}</span>
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>{entry.date}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                {entry.project && (
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                    background: '#f1f5f9', color: '#475569',
+                  }}>
+                    {entry.project}
+                  </span>
+                )}
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>{entry.visibility}</span>
+              </div>
+            </div>
+          </div>
+          <svg
+            style={{
+              width: 18, height: 18, color: '#94a3b8', transition: 'transform 0.2s',
+              transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            }}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+
+        {/* Entry Blocks */}
+        {expanded && (
+          <div style={{ padding: '0 24px 20px' }}>
+            {visibleBlocks.map((block, bi) => {
+              const sc = sectionColors[block.section] || sectionColors['기타']
+              return (
+                <div key={bi} style={{
+                  padding: '14px 16px', borderRadius: 10, marginTop: 8,
+                  background: '#f8fafc', border: '1px solid #f1f5f9',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span style={{
+                      padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                      background: sc.bg, color: sc.color,
+                    }}>
+                      {block.section}
+                    </span>
+                    {block.tags.map((tag) => (
+                      <span key={tag} style={{
+                        padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 500,
+                        background: '#e2e8f0', color: '#64748b',
+                      }}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{block.content}</p>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -172,19 +441,29 @@ export default function DailyFeed() {
             {roleDescription[currentRole]}
           </p>
         </div>
-        {currentRole === 'student' && (
-          <a href="/daily/write" style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '8px 16px', borderRadius: 10, fontSize: 13, fontWeight: 600,
-            background: '#4f46e5', color: '#fff', textDecoration: 'none',
-            boxShadow: '0 2px 8px rgba(79,70,229,0.3)',
-          }}>
-            <svg style={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            새 글 작성
-          </a>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ViewToggle
+            options={[
+              { value: 'time', label: '시간순' },
+              { value: 'project', label: '프로젝트별' },
+            ]}
+            value={feedView}
+            onChange={(v) => setFeedView(v as 'time' | 'project')}
+          />
+          {currentRole === 'student' && (
+            <a href="/daily/write" style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '8px 16px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+              background: '#4f46e5', color: '#fff', textDecoration: 'none',
+              boxShadow: '0 2px 8px rgba(79,70,229,0.3)',
+            }}>
+              <svg style={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              새 글 작성
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Main content + sidebar layout */}
@@ -235,106 +514,36 @@ export default function DailyFeed() {
           </div>
 
           {/* Feed Entries */}
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
-            {filteredEntries.map((entry, i) => {
-              const expanded = expandedEntries.has(entry.id)
-              const visibleBlocks = currentRole === 'external'
-                ? entry.blocks.filter(b => b.section !== '기타')
-                : entry.blocks
+          {feedView === 'time' ? (
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
+              {filteredEntries.map((entry, i) => renderEntryCard(entry, i))}
 
-              return (
-                <div
-                  key={entry.id}
-                  className={`opacity-0 animate-fade-in stagger-${Math.min(i + 2, 6)}`}
-                  style={{ ...cardStyle, overflow: 'hidden' }}
-                >
-                  {/* Entry Header */}
-                  <div
-                    onClick={() => toggleEntry(entry.id)}
-                    style={{
-                      padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      cursor: 'pointer', transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{
-                        width: 36, height: 36, borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #4f46e5, #3730a3)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                      }}>
-                        <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{entry.author.charAt(0)}</span>
-                      </div>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{entry.author}</span>
-                          <span style={{ fontSize: 12, color: '#94a3b8' }}>{entry.date}</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                          <span style={{
-                            padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-                            background: '#f1f5f9', color: '#475569',
-                          }}>
-                            {entry.project}
-                          </span>
-                          <span style={{ fontSize: 11, color: '#94a3b8' }}>{entry.visibility}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <svg
-                      style={{
-                        width: 18, height: 18, color: '#94a3b8', transition: 'transform 0.2s',
-                        transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                      }}
-                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-
-                  {/* Entry Blocks */}
-                  {expanded && (
-                    <div style={{ padding: '0 24px 20px' }}>
-                      {visibleBlocks.map((block, bi) => {
-                        const sc = sectionColors[block.section] || sectionColors['기타']
-                        return (
-                          <div key={bi} style={{
-                            padding: '14px 16px', borderRadius: 10, marginTop: 8,
-                            background: '#f8fafc', border: '1px solid #f1f5f9',
-                          }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                              <span style={{
-                                padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                                background: sc.bg, color: sc.color,
-                              }}>
-                                {block.section}
-                              </span>
-                              {block.tags.map((tag) => (
-                                <span key={tag} style={{
-                                  padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 500,
-                                  background: '#e2e8f0', color: '#64748b',
-                                }}>
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                            <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{block.content}</p>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
+              {filteredEntries.length === 0 && (
+                <div style={{ textAlign: 'center' as const, padding: 60, color: '#94a3b8' }}>
+                  <p style={{ fontSize: 15 }}>조건에 맞는 항목이 없습니다.</p>
                 </div>
-              )
-            })}
-
-            {filteredEntries.length === 0 && (
-              <div style={{ textAlign: 'center' as const, padding: 60, color: '#94a3b8' }}>
-                <p style={{ fontSize: 15 }}>조건에 맞는 항목이 없습니다.</p>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              {projectGroupedEntries.length === 0 && (
+                <div style={{ textAlign: 'center' as const, padding: 60, color: '#94a3b8' }}>
+                  <p style={{ fontSize: 15 }}>조건에 맞는 항목이 없습니다.</p>
+                </div>
+              )}
+              {projectGroupedEntries.map((group) => (
+                <CollapsibleProjectSection
+                  key={group.projectCode}
+                  title={group.project}
+                  icon={group.projectCode === '__none__' ? undefined : '\uD83D\uDCC1'}
+                  count={group.entries.length}
+                  defaultOpen={true}
+                >
+                  {group.entries.map((entry, i) => renderEntryCard(entry, i))}
+                </CollapsibleProjectSection>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Right sidebar: MiniCalendar */}
