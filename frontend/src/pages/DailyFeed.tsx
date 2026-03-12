@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useRole } from '../contexts/RoleContext'
+import MiniCalendar from '../components/MiniCalendar'
 
 const mockEntries = [
   {
@@ -78,8 +79,37 @@ const cardStyle = {
   boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)',
 }
 
+// Mock marked dates for day-mode calendar
+const dailyMarkedDates: Record<string, 'submitted' | 'partial' | 'none'> = {
+  '2026-03-03': 'submitted',
+  '2026-03-04': 'submitted',
+  '2026-03-05': 'partial',
+  '2026-03-06': 'submitted',
+  '2026-03-07': 'submitted',
+  '2026-03-10': 'submitted',
+  '2026-03-11': 'submitted',
+  '2026-03-12': 'partial',
+  '2026-03-13': 'submitted',
+  '2026-03-17': 'partial',
+  '2026-03-18': 'submitted',
+  '2026-03-24': 'submitted',
+  '2026-03-25': 'submitted',
+  '2026-03-26': 'partial',
+}
+
+function formatDateLabel(d: Date): string {
+  const y = d.getFullYear()
+  const m = d.getMonth() + 1
+  const day = d.getDate()
+  const weekdays = ['일', '월', '화', '수', '목', '금', '토']
+  return `${y}년 ${m}월 ${day}일 (${weekdays[d.getDay()]})`
+}
+
 export default function DailyFeed() {
   const { currentRole } = useRole()
+  const [selectedDate, setSelectedDate] = useState(new Date(2026, 2, 12))
+  const handleDaySelect = useCallback((d: Date) => setSelectedDate(d), [])
+  const selectedDateLabel = useMemo(() => formatDateLabel(selectedDate), [selectedDate])
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set([1, 2]))
   const [filterDate, setFilterDate] = useState('')
   const [filterAuthor, setFilterAuthor] = useState('')
@@ -131,7 +161,7 @@ export default function DailyFeed() {
   }
 
   return (
-    <div key={currentRole} style={{ maxWidth: 900, margin: '0 auto' }}>
+    <div key={currentRole} className="daily-feed-root" style={{ maxWidth: 1160, margin: '0 auto' }}>
       {/* Header */}
       <div style={{ marginBottom: 32, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap' as const, gap: 12 }} className="animate-fade-in">
         <div>
@@ -157,137 +187,177 @@ export default function DailyFeed() {
         )}
       </div>
 
-      {/* Filter Bar */}
-      <div className="opacity-0 animate-fade-in stagger-1" style={{
-        ...cardStyle, padding: '16px 20px', marginBottom: 20,
-        display: 'flex', gap: 12, flexWrap: 'wrap' as const, alignItems: 'flex-end',
-      }}>
-        <FilterSelect label="날짜" value={filterDate} onChange={setFilterDate} options={[
-          { value: '', label: '전체' },
-          { value: '2026-03-11', label: '2026-03-11' },
-          { value: '2026-03-10', label: '2026-03-10' },
-        ]} />
-        {currentRole === 'professor' && (
-          <FilterSelect label="학생" value={filterAuthor} onChange={setFilterAuthor} options={[
-            { value: '', label: '전체' },
-            ...visibleAuthors.map(a => ({ value: a, label: a })),
-          ]} />
-        )}
-        <FilterSelect label="과제" value={filterProject} onChange={setFilterProject} options={[
-          { value: '', label: '전체' },
-          ...visibleProjects.map((p: { code: string; name: string }) => ({ value: p.code, label: p.name })),
-        ]} />
-        <FilterSelect label="섹션" value={filterSection} onChange={setFilterSection} options={[
-          { value: '', label: '전체' },
-          { value: '어제 한 일', label: '어제 한 일' },
-          { value: '오늘 할 일', label: '오늘 할 일' },
-          { value: '이슈/논의', label: '이슈/논의' },
-          { value: '기타', label: '기타' },
-        ]} />
-      </div>
-
-      {/* Feed Entries */}
-      <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
-        {filteredEntries.map((entry, i) => {
-          const expanded = expandedEntries.has(entry.id)
-          // External: filter out non-project-scope blocks (e.g. private sections)
-          const visibleBlocks = currentRole === 'external'
-            ? entry.blocks.filter(b => b.section !== '기타')
-            : entry.blocks
-
-          return (
-            <div
-              key={entry.id}
-              className={`opacity-0 animate-fade-in stagger-${Math.min(i + 2, 6)}`}
-              style={{ ...cardStyle, overflow: 'hidden' }}
-            >
-              {/* Entry Header */}
-              <div
-                onClick={() => toggleEntry(entry.id)}
-                style={{
-                  padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  cursor: 'pointer', transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: '50%',
-                    background: 'linear-gradient(135deg, #4f46e5, #3730a3)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                  }}>
-                    <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{entry.author.charAt(0)}</span>
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{entry.author}</span>
-                      <span style={{ fontSize: 12, color: '#94a3b8' }}>{entry.date}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                      <span style={{
-                        padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-                        background: '#f1f5f9', color: '#475569',
-                      }}>
-                        {entry.project}
-                      </span>
-                      <span style={{ fontSize: 11, color: '#94a3b8' }}>{entry.visibility}</span>
-                    </div>
-                  </div>
-                </div>
-                <svg
-                  style={{
-                    width: 18, height: 18, color: '#94a3b8', transition: 'transform 0.2s',
-                    transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                  }}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-
-              {/* Entry Blocks */}
-              {expanded && (
-                <div style={{ padding: '0 24px 20px' }}>
-                  {visibleBlocks.map((block, bi) => {
-                    const sc = sectionColors[block.section] || sectionColors['기타']
-                    return (
-                      <div key={bi} style={{
-                        padding: '14px 16px', borderRadius: 10, marginTop: 8,
-                        background: '#f8fafc', border: '1px solid #f1f5f9',
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                          <span style={{
-                            padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                            background: sc.bg, color: sc.color,
-                          }}>
-                            {block.section}
-                          </span>
-                          {block.tags.map((tag) => (
-                            <span key={tag} style={{
-                              padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 500,
-                              background: '#e2e8f0', color: '#64748b',
-                            }}>
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                        <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{block.content}</p>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )
-        })}
-
-        {filteredEntries.length === 0 && (
-          <div style={{ textAlign: 'center' as const, padding: 60, color: '#94a3b8' }}>
-            <p style={{ fontSize: 15 }}>조건에 맞는 항목이 없습니다.</p>
+      {/* Main content + sidebar layout */}
+      <div className="daily-feed-layout" style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+        {/* Left: main content */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Selected date label */}
+          <div className="opacity-0 animate-fade-in stagger-1" style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            marginBottom: 16,
+            padding: '10px 16px',
+            background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{selectedDateLabel}</span>
           </div>
-        )}
+
+          {/* Filter Bar */}
+          <div className="opacity-0 animate-fade-in stagger-1" style={{
+            ...cardStyle, padding: '16px 20px', marginBottom: 20,
+            display: 'flex', gap: 12, flexWrap: 'wrap' as const, alignItems: 'flex-end',
+          }}>
+            <FilterSelect label="날짜" value={filterDate} onChange={setFilterDate} options={[
+              { value: '', label: '전체' },
+              { value: '2026-03-11', label: '2026-03-11' },
+              { value: '2026-03-10', label: '2026-03-10' },
+            ]} />
+            {currentRole === 'professor' && (
+              <FilterSelect label="학생" value={filterAuthor} onChange={setFilterAuthor} options={[
+                { value: '', label: '전체' },
+                ...visibleAuthors.map(a => ({ value: a, label: a })),
+              ]} />
+            )}
+            <FilterSelect label="과제" value={filterProject} onChange={setFilterProject} options={[
+              { value: '', label: '전체' },
+              ...visibleProjects.map((p: { code: string; name: string }) => ({ value: p.code, label: p.name })),
+            ]} />
+            <FilterSelect label="섹션" value={filterSection} onChange={setFilterSection} options={[
+              { value: '', label: '전체' },
+              { value: '어제 한 일', label: '어제 한 일' },
+              { value: '오늘 할 일', label: '오늘 할 일' },
+              { value: '이슈/논의', label: '이슈/논의' },
+              { value: '기타', label: '기타' },
+            ]} />
+          </div>
+
+          {/* Feed Entries */}
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
+            {filteredEntries.map((entry, i) => {
+              const expanded = expandedEntries.has(entry.id)
+              const visibleBlocks = currentRole === 'external'
+                ? entry.blocks.filter(b => b.section !== '기타')
+                : entry.blocks
+
+              return (
+                <div
+                  key={entry.id}
+                  className={`opacity-0 animate-fade-in stagger-${Math.min(i + 2, 6)}`}
+                  style={{ ...cardStyle, overflow: 'hidden' }}
+                >
+                  {/* Entry Header */}
+                  <div
+                    onClick={() => toggleEntry(entry.id)}
+                    style={{
+                      padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      cursor: 'pointer', transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{
+                        width: 36, height: 36, borderRadius: '50%',
+                        background: 'linear-gradient(135deg, #4f46e5, #3730a3)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}>
+                        <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{entry.author.charAt(0)}</span>
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{entry.author}</span>
+                          <span style={{ fontSize: 12, color: '#94a3b8' }}>{entry.date}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                          <span style={{
+                            padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                            background: '#f1f5f9', color: '#475569',
+                          }}>
+                            {entry.project}
+                          </span>
+                          <span style={{ fontSize: 11, color: '#94a3b8' }}>{entry.visibility}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <svg
+                      style={{
+                        width: 18, height: 18, color: '#94a3b8', transition: 'transform 0.2s',
+                        transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                      }}
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+
+                  {/* Entry Blocks */}
+                  {expanded && (
+                    <div style={{ padding: '0 24px 20px' }}>
+                      {visibleBlocks.map((block, bi) => {
+                        const sc = sectionColors[block.section] || sectionColors['기타']
+                        return (
+                          <div key={bi} style={{
+                            padding: '14px 16px', borderRadius: 10, marginTop: 8,
+                            background: '#f8fafc', border: '1px solid #f1f5f9',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                              <span style={{
+                                padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                background: sc.bg, color: sc.color,
+                              }}>
+                                {block.section}
+                              </span>
+                              {block.tags.map((tag) => (
+                                <span key={tag} style={{
+                                  padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 500,
+                                  background: '#e2e8f0', color: '#64748b',
+                                }}>
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                            <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{block.content}</p>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
+            {filteredEntries.length === 0 && (
+              <div style={{ textAlign: 'center' as const, padding: 60, color: '#94a3b8' }}>
+                <p style={{ fontSize: 15 }}>조건에 맞는 항목이 없습니다.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right sidebar: MiniCalendar */}
+        <div className="daily-feed-sidebar opacity-0 animate-fade-in stagger-1" style={{ flexShrink: 0 }}>
+          <MiniCalendar
+            mode="day"
+            selectedDate={selectedDate}
+            onSelect={handleDaySelect}
+            markedDates={dailyMarkedDates}
+          />
+        </div>
       </div>
+
+      <style>{`
+        @media (max-width: 768px) {
+          .daily-feed-layout {
+            flex-direction: column-reverse !important;
+          }
+          .daily-feed-sidebar {
+            align-self: center;
+          }
+        }
+      `}</style>
     </div>
   )
 }

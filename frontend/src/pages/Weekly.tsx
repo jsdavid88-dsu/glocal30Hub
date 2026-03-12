@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useRole } from '../contexts/RoleContext'
+import MiniCalendar from '../components/MiniCalendar'
 import {
   DndContext,
   DragOverlay,
@@ -41,7 +42,30 @@ interface StudentInfo {
 }
 
 // ─── Mock Data ───
-const weekOptions = ['이번 주 (3/10 ~ 3/14)', '지난 주 (3/3 ~ 3/7)', '2주 전 (2/24 ~ 2/28)']
+// Mock marked dates for the mini calendar (weeks with entries)
+const weeklyMarkedDates: Record<string, 'submitted' | 'partial' | 'none'> = {
+  // Feb 2026
+  '2026-02-16': 'submitted', '2026-02-17': 'submitted', '2026-02-18': 'submitted', '2026-02-19': 'submitted', '2026-02-20': 'submitted',
+  '2026-02-23': 'submitted', '2026-02-24': 'submitted', '2026-02-25': 'partial', '2026-02-26': 'submitted', '2026-02-27': 'submitted',
+  // Mar 2026
+  '2026-03-02': 'submitted', '2026-03-03': 'submitted', '2026-03-04': 'submitted', '2026-03-05': 'submitted', '2026-03-06': 'submitted',
+  '2026-03-09': 'submitted', '2026-03-10': 'submitted', '2026-03-11': 'partial', '2026-03-12': 'submitted', '2026-03-13': 'submitted',
+}
+
+function getWeekLabel(date: Date): string {
+  // Get Monday of the selected week
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  const monday = new Date(d)
+  monday.setDate(d.getDate() + diff)
+  const friday = new Date(monday)
+  friday.setDate(monday.getDate() + 4)
+
+  const m = monday.getMonth() + 1
+  const weekNum = Math.ceil(monday.getDate() / 7)
+  return `${m}월 ${weekNum}주차 (${m}/${monday.getDate()} ~ ${friday.getMonth() + 1}/${friday.getDate()})`
+}
 
 const initialPoolTasks: TaskItem[] = [
   { id: 'task-1', title: 'Diffusion Model Survey 2026', description: '최신 diffusion 모델 동향 파악', type: '논문리뷰' },
@@ -365,7 +389,9 @@ export default function Weekly() {
 // Professor Weekly View
 // ═══════════════════════════════════════
 function ProfessorWeekly() {
-  const [selectedWeek, setSelectedWeek] = useState(0)
+  const [selectedDate, setSelectedDate] = useState(new Date(2026, 2, 12)) // March 12, 2026
+  const weekLabel = useMemo(() => getWeekLabel(selectedDate), [selectedDate])
+  const handleWeekSelect = useCallback((d: Date) => setSelectedDate(d), [])
   const [meetingNotes, setMeetingNotes] = useState('')
 
   // Task pool state
@@ -490,26 +516,26 @@ function ProfessorWeekly() {
           </p>
         </div>
 
-        {/* Week Selector */}
-        <div style={{ marginBottom: 28 }} className="opacity-0 animate-fade-in stagger-1">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {weekOptions.map((w, i) => (
-              <button
-                key={i}
-                onClick={() => setSelectedWeek(i)}
-                style={{
-                  padding: '8px 18px', borderRadius: 10,
-                  fontSize: 13, fontWeight: 500,
-                  border: 'none', cursor: 'pointer',
-                  background: selectedWeek === i ? '#4f46e5' : '#fff',
-                  color: selectedWeek === i ? '#fff' : '#64748b',
-                  boxShadow: selectedWeek === i ? '0 2px 8px rgba(79,70,229,0.25)' : '0 1px 2px rgba(0,0,0,0.05)',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {w}
-              </button>
-            ))}
+        {/* Week Selector with MiniCalendar */}
+        <div style={{ marginBottom: 28, display: 'flex', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }} className="opacity-0 animate-fade-in stagger-1">
+          <MiniCalendar
+            mode="week"
+            selectedDate={selectedDate}
+            onSelect={handleWeekSelect}
+            markedDates={weeklyMarkedDates}
+          />
+          <div style={{
+            padding: '14px 20px',
+            background: '#fff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 12,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>{weekLabel}</span>
           </div>
         </div>
 
