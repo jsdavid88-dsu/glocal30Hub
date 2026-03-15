@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useRole } from '../contexts/RoleContext'
 import { api } from '../api/client'
 import MiniCalendar from '../components/MiniCalendar'
@@ -132,6 +132,198 @@ function CollapsibleProjectSection({
   )
 }
 
+// ═══════════════════════════════════════
+// Block Comments
+// ═══════════════════════════════════════
+function formatTimeAgo(dateStr: string): string {
+  const now = new Date()
+  const d = new Date(dateStr)
+  const diffMs = now.getTime() - d.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '방금 전'
+  if (diffMin < 60) return `${diffMin}분 전`
+  const diffHrs = Math.floor(diffMin / 60)
+  if (diffHrs < 24) return `${diffHrs}시간 전`
+  const diffDays = Math.floor(diffHrs / 24)
+  if (diffDays < 7) return `${diffDays}일 전`
+  return d.toLocaleDateString('ko-KR')
+}
+
+function BlockComments({ blockId }: { blockId: string }) {
+  const [open, setOpen] = useState(false)
+  const [comments, setComments] = useState<any[]>([])
+  const [commentCount, setCommentCount] = useState(0)
+  const [newComment, setNewComment] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Fetch comment count on mount (light fetch)
+  useEffect(() => {
+    if (!blockId) return
+    ;(async () => {
+      try {
+        const data: any = await api.comments.list(blockId)
+        const items = Array.isArray(data) ? data : (data?.data || [])
+        setCommentCount(items.length)
+        setComments(items)
+      } catch {
+        // API not available
+      }
+    })()
+  }, [blockId])
+
+  const handleToggle = () => {
+    setOpen(!open)
+    if (!open && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 100)
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (!newComment.trim() || submitting) return
+    setSubmitting(true)
+    try {
+      await api.comments.create(blockId, newComment.trim())
+      setNewComment('')
+      // Refresh comments
+      const data: any = await api.comments.list(blockId)
+      const items = Array.isArray(data) ? data : (data?.data || [])
+      setComments(items)
+      setCommentCount(items.length)
+    } catch {
+      // Error handling
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit()
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      {/* Comment toggle button */}
+      <button
+        onClick={handleToggle}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '3px 8px',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          fontSize: 11,
+          color: commentCount > 0 ? '#4f46e5' : '#94a3b8',
+          fontWeight: commentCount > 0 ? 600 : 400,
+          borderRadius: 6,
+          transition: 'all 0.15s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+        </svg>
+        {commentCount > 0 ? `${commentCount}` : '댓글'}
+      </button>
+
+      {/* Expanded comment section */}
+      {open && (
+        <div style={{
+          marginTop: 8,
+          padding: '12px 14px',
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          borderRadius: 10,
+        }}>
+          {/* Comment list */}
+          {comments.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10, marginBottom: 12 }}>
+              {comments.map((c: any) => (
+                <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <div style={{
+                    width: 24, height: 24, borderRadius: '50%',
+                    background: '#e0e7ff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0, marginTop: 1,
+                  }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: '#4338ca' }}>
+                      {(c.author_name || '?').charAt(0)}
+                    </span>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
+                        {c.author_name || '알 수 없음'}
+                      </span>
+                      <span style={{ fontSize: 10, color: '#94a3b8' }}>
+                        {c.created_at ? formatTimeAgo(c.created_at) : ''}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 12, color: '#475569', lineHeight: 1.6, margin: '2px 0 0' }}>
+                      {c.content}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 10px' }}>아직 댓글이 없습니다.</p>
+          )}
+
+          {/* New comment input */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              ref={inputRef}
+              type="text"
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="댓글을 입력하세요..."
+              style={{
+                flex: 1,
+                padding: '7px 12px',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                fontSize: 12,
+                color: '#0f172a',
+                outline: 'none',
+                background: '#f8fafc',
+                transition: 'border-color 0.15s',
+              }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = '#4f46e5' }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = '#e2e8f0' }}
+            />
+            <button
+              onClick={handleSubmit}
+              disabled={!newComment.trim() || submitting}
+              style={{
+                padding: '7px 14px',
+                border: 'none',
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 600,
+                background: newComment.trim() ? '#4f46e5' : '#e2e8f0',
+                color: newComment.trim() ? '#fff' : '#94a3b8',
+                cursor: newComment.trim() ? 'pointer' : 'default',
+                transition: 'all 0.15s',
+                whiteSpace: 'nowrap' as const,
+              }}
+            >
+              {submitting ? '...' : '등록'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DailyFeed() {
   const { currentRole } = useRole()
   const [selectedDate, setSelectedDate] = useState(new Date(2026, 2, 12))
@@ -214,6 +406,7 @@ export default function DailyFeed() {
             visibility: visibilityLabel,
             isAdvisee: true,
             blocks: (log.blocks || []).map((b: any) => ({
+              id: b.id || null,
               section: sectionLabelMap[b.section] || b.section || '기타',
               content: b.content || '',
               tags: (b.tags || []).map((t: any) => t.tag?.name || t.name || ''),
@@ -368,7 +561,7 @@ export default function DailyFeed() {
             {visibleBlocks.map((block, bi) => {
               const sc = sectionColors[block.section] || sectionColors['기타']
               return (
-                <div key={bi} style={{
+                <div key={block.id || bi} style={{
                   padding: '14px 16px', borderRadius: 10, marginTop: 8,
                   background: '#f8fafc', border: '1px solid #f1f5f9',
                 }}>
@@ -389,6 +582,70 @@ export default function DailyFeed() {
                     ))}
                   </div>
                   <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{block.content}</p>
+
+                  {/* Attachment previews */}
+                  {block.attachments && block.attachments.length > 0 && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginTop: 10 }}>
+                      {block.attachments.map((att: any) => {
+                        const isImage = (att.file_type || att.content_type || '').startsWith('image/')
+                        const fileUrl = att.file_url || att.url || ''
+                        const fileName = att.file_name || att.original_name || 'file'
+                        return (
+                          <div key={att.id} style={{
+                            borderRadius: 8,
+                            border: '1px solid #e2e8f0',
+                            overflow: 'hidden',
+                            background: '#fff',
+                          }}>
+                            {isImage ? (
+                              <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+                                <img
+                                  src={fileUrl}
+                                  alt={fileName}
+                                  style={{
+                                    width: 100,
+                                    height: 100,
+                                    objectFit: 'cover' as const,
+                                    display: 'block',
+                                  }}
+                                />
+                              </a>
+                            ) : (
+                              <a
+                                href={fileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  padding: '8px 12px',
+                                  textDecoration: 'none',
+                                  fontSize: 12,
+                                  color: '#4f46e5',
+                                }}
+                              >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                                  <polyline points="14 2 14 8 20 8"/>
+                                </svg>
+                                <span style={{
+                                  maxWidth: 120,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap' as const,
+                                }}>
+                                  {fileName}
+                                </span>
+                              </a>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {block.id && <BlockComments blockId={block.id} />}
                 </div>
               )
             })}

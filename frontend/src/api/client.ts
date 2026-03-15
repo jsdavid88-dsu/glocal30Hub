@@ -75,6 +75,24 @@ export const api = {
     create: (blockId: string, content: string) =>
       request(`/daily-blocks/${blockId}/comments`, { method: 'POST', body: JSON.stringify({ content }) }),
   },
+  // Uploads
+  uploads: {
+    upload: (file: File, blockId?: string) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (blockId) formData.append('block_id', blockId);
+      const token = localStorage.getItem('token');
+      return fetch(`${API_BASE}/uploads/`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      }).then(r => {
+        if (!r.ok) throw new Error(`Upload failed: ${r.status}`);
+        return r.json();
+      });
+    },
+    getUrl: (fileId: string) => `${API_BASE}/uploads/${fileId}`,
+  },
   // Events (TODO: router not yet mounted in backend — calls will 404 until Phase 3)
   events: {
     list: (params?: Record<string, string>) => request(`/events/?${new URLSearchParams(params)}`),

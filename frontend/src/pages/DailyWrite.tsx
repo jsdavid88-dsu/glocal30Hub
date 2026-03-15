@@ -1,7 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../api/client'
 
 type TaskStatus = '진행중' | '새로' | '완료' | '블로킹'
+
+interface UploadedFile {
+  id: string
+  filename: string
+  original_name: string
+  content_type: string
+  size: number
+  url: string
+}
 
 interface AssignedTask {
   id: number
@@ -54,6 +63,167 @@ const cardStyle = {
   boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)',
 }
 
+function FileAttachmentZone({
+  files,
+  uploading,
+  onUpload,
+  onRemove,
+}: {
+  files: UploadedFile[]
+  uploading: boolean
+  onUpload: (files: FileList | null) => void
+  onRemove: (fileId: string) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [dragOver, setDragOver] = useState(false)
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    onUpload(e.dataTransfer.files)
+  }
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {/* Drop zone */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          padding: '12px 16px',
+          borderRadius: 8,
+          border: `1.5px dashed ${dragOver ? '#4f46e5' : '#cbd5e1'}`,
+          background: dragOver ? '#eef2ff' : '#f8fafc',
+          cursor: 'pointer',
+          transition: 'all 0.15s',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+        }}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => { onUpload(e.target.files); e.target.value = '' }}
+        />
+        {uploading ? (
+          <span style={{ fontSize: 12, color: '#4f46e5', fontWeight: 500 }}>업로드 중...</span>
+        ) : (
+          <>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+              파일 첨부 (이미지, PDF / 최대 10MB)
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* Uploaded file previews */}
+      {files.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginTop: 8 }}>
+          {files.map((f) => {
+            const isImage = f.content_type.startsWith('image/')
+            return (
+              <div
+                key={f.id}
+                style={{
+                  position: 'relative' as const,
+                  borderRadius: 8,
+                  border: '1px solid #e2e8f0',
+                  overflow: 'hidden',
+                  background: '#f8fafc',
+                }}
+              >
+                {isImage ? (
+                  <a href={f.url} target="_blank" rel="noopener noreferrer">
+                    <img
+                      src={f.url}
+                      alt={f.original_name}
+                      style={{
+                        width: 80,
+                        height: 80,
+                        objectFit: 'cover' as const,
+                        display: 'block',
+                      }}
+                    />
+                  </a>
+                ) : (
+                  <a
+                    href={f.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column' as const,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 80,
+                      height: 80,
+                      textDecoration: 'none',
+                      padding: 6,
+                    }}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                      <line x1="16" y1="13" x2="8" y2="13"/>
+                      <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    <span style={{
+                      fontSize: 10,
+                      color: '#64748b',
+                      marginTop: 4,
+                      maxWidth: 68,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap' as const,
+                      textAlign: 'center' as const,
+                    }}>
+                      {f.original_name}
+                    </span>
+                  </a>
+                )}
+                {/* Remove button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemove(f.id) }}
+                  style={{
+                    position: 'absolute' as const,
+                    top: 2,
+                    right: 2,
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    background: 'rgba(0,0,0,0.5)',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    lineHeight: '18px',
+                    textAlign: 'center' as const,
+                    padding: 0,
+                  }}
+                >
+                  x
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DailyWrite() {
   const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
 
@@ -100,6 +270,55 @@ export default function DailyWrite() {
     setTaskStatuses(Object.fromEntries(tasks.map((t) => [t.id, t.status])))
     setTaskProgress(Object.fromEntries(tasks.map((t) => [t.id, ''])))
   }, [tasks])
+
+  // File attachments per task and memo
+  const [taskFiles, setTaskFiles] = useState<Record<number, UploadedFile[]>>({})
+  const [memoFiles, setMemoFiles] = useState<UploadedFile[]>([])
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null)
+
+  const handleFileUpload = useCallback(async (files: FileList | null, target: string, taskId?: number) => {
+    if (!files || files.length === 0) return
+    const uploadKey = taskId !== undefined ? `task-${taskId}` : target
+    setUploadingFor(uploadKey)
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 10 * 1024 * 1024) {
+          setSaveMessage(`파일 크기 초과: ${file.name} (최대 10MB)`)
+          continue
+        }
+        const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
+        if (!allowed.includes(file.type)) {
+          setSaveMessage(`허용되지 않는 형식: ${file.name}`)
+          continue
+        }
+        const result = await api.uploads.upload(file)
+        const uploaded: UploadedFile = result as UploadedFile
+        if (taskId !== undefined) {
+          setTaskFiles(prev => ({
+            ...prev,
+            [taskId]: [...(prev[taskId] || []), uploaded],
+          }))
+        } else {
+          setMemoFiles(prev => [...prev, uploaded])
+        }
+      }
+    } catch {
+      setSaveMessage('파일 업로드 실패')
+    } finally {
+      setUploadingFor(null)
+    }
+  }, [])
+
+  const removeFile = useCallback((fileId: string, taskId?: number) => {
+    if (taskId !== undefined) {
+      setTaskFiles(prev => ({
+        ...prev,
+        [taskId]: (prev[taskId] || []).filter(f => f.id !== fileId),
+      }))
+    } else {
+      setMemoFiles(prev => prev.filter(f => f.id !== fileId))
+    }
+  }, [])
 
   const [memoContent, setMemoContent] = useState('')
   const [memoVisibility, setMemoVisibility] = useState('advisor')
@@ -231,7 +450,7 @@ export default function DailyWrite() {
                     </div>
                   </div>
 
-                  {/* Progress textarea */}
+                  {/* Progress textarea + file attachment */}
                   <div style={{ padding: '12px 28px 20px' }}>
                     <textarea
                       value={taskProgress[task.id]}
@@ -249,6 +468,14 @@ export default function DailyWrite() {
                       onFocus={(e) => { if (!isCompleted) e.currentTarget.style.borderColor = '#4f46e5' }}
                       onBlur={(e) => { e.currentTarget.style.borderColor = '#e2e8f0' }}
                     />
+                    {!isCompleted && (
+                      <FileAttachmentZone
+                        files={taskFiles[task.id] || []}
+                        uploading={uploadingFor === `task-${task.id}`}
+                        onUpload={(files) => handleFileUpload(files, 'task', task.id)}
+                        onRemove={(fileId) => removeFile(fileId, task.id)}
+                      />
+                    )}
                   </div>
                 </div>
               )
@@ -279,6 +506,12 @@ export default function DailyWrite() {
               }}
               onFocus={(e) => { e.currentTarget.style.borderColor = '#4f46e5' }}
               onBlur={(e) => { e.currentTarget.style.borderColor = '#e2e8f0' }}
+            />
+            <FileAttachmentZone
+              files={memoFiles}
+              uploading={uploadingFor === 'memo'}
+              onUpload={(files) => handleFileUpload(files, 'memo')}
+              onRemove={(fileId) => removeFile(fileId)}
             />
           </div>
 
