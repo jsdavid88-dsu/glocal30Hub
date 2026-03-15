@@ -44,6 +44,9 @@ class ProjectSummaryResponse(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     created_at: datetime
+    member_count: int = 0
+    task_done: int = 0
+    task_total: int = 0
 
     model_config = {"from_attributes": True}
 

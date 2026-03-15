@@ -53,6 +53,9 @@ export const api = {
       request(`/tasks/${id}/assignees`, { method: 'POST', body: JSON.stringify({ user_id: userId, is_primary: isPrimary }) }),
     unassign: (id: string, userId: string) =>
       request(`/tasks/${id}/assignees/${userId}`, { method: 'DELETE' }),
+    carryover: (taskIds: string[], newDueDate: string) =>
+      request('/tasks/carryover', { method: 'POST', body: JSON.stringify({ task_ids: taskIds, new_due_date: newDueDate }) }),
+    summaryByStudent: (weekStart: string) => request(`/tasks/summary-by-student?week_start=${weekStart}`),
   },
   // Daily
   daily: {
@@ -92,6 +95,13 @@ export const api = {
       });
     },
     getUrl: (fileId: string) => `${API_BASE}/uploads/${fileId}`,
+  },
+  // Weekly
+  weekly: {
+    getNotes: (weekStart: string) => request(`/weekly-notes/?week_start=${weekStart}`),
+    saveNotes: (weekStart: string, content: string) =>
+      request('/weekly-notes/', { method: 'POST', body: JSON.stringify({ week_start: weekStart, content }) }),
+    getSummary: (weekStart: string) => request(`/weekly-notes/summary?week_start=${weekStart}`),
   },
   // Events (TODO: router not yet mounted in backend — calls will 404 until Phase 3)
   events: {

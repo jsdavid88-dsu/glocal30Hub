@@ -45,31 +45,49 @@ interface StudentInfo {
   project?: string
 }
 
-// ─── Project definitions ───
-const projectList = [
-  'KOCCA AI Animation Pipeline',
-  'NRF GCA Narratology',
-  'Digital Heritage Archive',
-]
+interface StudentSummary {
+  name: string
+  done: number
+  inProgress: number
+  notStarted: number
+  dailyCount: number
+  project?: string
+}
 
-// ─── Mock Data ───
-// Mock marked dates for the mini calendar (weeks with entries)
-const weeklyMarkedDates: Record<string, 'submitted' | 'partial' | 'none'> = {
-  // Feb 2026
-  '2026-02-16': 'submitted', '2026-02-17': 'submitted', '2026-02-18': 'submitted', '2026-02-19': 'submitted', '2026-02-20': 'submitted',
-  '2026-02-23': 'submitted', '2026-02-24': 'submitted', '2026-02-25': 'partial', '2026-02-26': 'submitted', '2026-02-27': 'submitted',
-  // Mar 2026
-  '2026-03-02': 'submitted', '2026-03-03': 'submitted', '2026-03-04': 'submitted', '2026-03-05': 'submitted', '2026-03-06': 'submitted',
-  '2026-03-09': 'submitted', '2026-03-10': 'submitted', '2026-03-11': 'partial', '2026-03-12': 'submitted', '2026-03-13': 'submitted',
+interface AssignedTask {
+  title: string
+  description: string
+  url: string
+  guide: string
+  status: '완료' | '진행중' | '미시작' | '새로 배정' | '이월'
+  assignedBy: string
+  project: string
+}
+
+interface ExternalProjectSummary {
+  project: string
+  code: string
+  completedTasks: number
+  inProgressTasks: number
+  notStartedTasks: number
+  keyUpdates: string[]
+}
+
+// ─── Helpers ───
+function getMonday(d: Date): Date {
+  const date = new Date(d)
+  const day = date.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  date.setDate(date.getDate() + diff)
+  return date
+}
+
+function formatDateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function getWeekLabel(date: Date): string {
-  // Get Monday of the selected week
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  const monday = new Date(d)
-  monday.setDate(d.getDate() + diff)
+  const monday = getMonday(date)
   const friday = new Date(monday)
   friday.setDate(monday.getDate() + 4)
 
@@ -78,37 +96,17 @@ function getWeekLabel(date: Date): string {
   return `${m}월 ${weekNum}주차 (${m}/${monday.getDate()} ~ ${friday.getMonth() + 1}/${friday.getDate()})`
 }
 
-const initialPoolTasks: TaskItem[] = [
-  { id: 'task-1', title: 'Diffusion Model Survey 2026', description: '최신 diffusion 모델 동향 파악', type: '논문리뷰' },
-  { id: 'task-2', title: 'GAN vs Diffusion 비교 실험', description: 'FID/IS 지표 비교', type: '연구' },
-  { id: 'task-3', title: '데이터 전처리 파이프라인 개선', description: '배치 처리 속도 최적화', type: '개발' },
-  { id: 'task-4', title: 'NeRF 3D Reconstruction 논문', description: 'SIGGRAPH 2026 논문', type: '논문리뷰' },
-  { id: 'task-5', title: '연구실 세미나 발표 준비', description: '3/20 발표', type: '기타' },
-]
-
-const initialCarryOverTasks: TaskItem[] = [
-  { id: 'carry-1', title: 'StyleGAN3 벤치마크', description: '지난주 미완료', type: '연구', carryOver: true },
-]
-
-const mockStudents: StudentInfo[] = [
-  { name: '한감성', badge: '지도학생', project: 'KOCCA AI Animation Pipeline' },
-  { name: '윤스마', badge: '지도학생', project: 'Digital Heritage Archive' },
-  { name: '정인턴', badge: '지도학생', project: 'KOCCA AI Animation Pipeline' },
-  { name: '강데이', badge: '지도학생', project: 'NRF GCA Narratology' },
-  { name: '박프로', badge: '프로젝트', project: 'KOCCA AI Animation Pipeline' },
-  { name: '임연구', badge: '프로젝트', project: 'NRF GCA Narratology' },
-  { name: '송리서', badge: '지도학생' },
-]
-
-// carry-1 starts assigned to 한감성
-const initialAssignments: Record<string, string[]> = {
-  '한감성': ['carry-1'],
-  '윤스마': [],
-  '정인턴': [],
-  '강데이': [],
-  '박프로': [],
-  '임연구': [],
-  '송리서': [],
+function mapApiTaskToTaskItem(t: any, projectName?: string): TaskItem {
+  return {
+    id: String(t.id),
+    title: t.title,
+    description: t.description || '',
+    type: (t.task_type || t.type || '기타') as TaskType,
+    url: t.reference_url || t.url || undefined,
+    guide: t.guide || undefined,
+    carryOver: t.is_carry_over || t.carryOver || false,
+    project: t.project_name || t.project || projectName || undefined,
+  }
 }
 
 const typeBadgeColors: Record<TaskType, { bg: string; color: string }> = {
@@ -117,67 +115,6 @@ const typeBadgeColors: Record<TaskType, { bg: string; color: string }> = {
   '개발': { bg: '#d1fae5', color: '#047857' },
   '기타': { bg: '#f1f5f9', color: '#64748b' },
 }
-
-// ─── Student/External Mock Data ───
-const studentSummaries = [
-  { name: '한감성', done: 3, inProgress: 2, notStarted: 0, dailyCount: 5, project: 'KOCCA AI Animation Pipeline' },
-  { name: '윤스마', done: 1, inProgress: 1, notStarted: 2, dailyCount: 3, project: 'Digital Heritage Archive' },
-  { name: '정인턴', done: 2, inProgress: 1, notStarted: 1, dailyCount: 4, project: 'KOCCA AI Animation Pipeline' },
-  { name: '강데이', done: 4, inProgress: 0, notStarted: 0, dailyCount: 5, project: 'NRF GCA Narratology' },
-  { name: '임연구', done: 2, inProgress: 1, notStarted: 0, dailyCount: 4, project: 'NRF GCA Narratology' },
-  { name: '송리서', done: 0, inProgress: 2, notStarted: 1, dailyCount: 2 },
-]
-
-const myLastWeekSummary = { done: 3, inProgress: 2, notStarted: 0, dailyCount: 5 }
-
-const myAssignedTasks = [
-  {
-    title: 'GAN 논문 리뷰 (StyleGAN3)',
-    description: 'Section 3의 adaptive discriminator augmentation 중심으로 분석',
-    url: 'https://arxiv.org/abs/2106.12423',
-    guide: 'Section 3 중심으로 읽고, 기존 StyleGAN2 대비 변경점 정리',
-    status: '진행중' as const,
-    assignedBy: '김교수',
-    project: 'KOCCA AI Animation Pipeline',
-  },
-  {
-    title: '모델 A 벤치마크 실행',
-    description: 'FID/IS 메트릭으로 CIFAR-10, FFHQ 데이터셋에서 벤치마크',
-    url: '',
-    guide: 'GPU 서버 3번에서 실행. batch_size=64, epochs=100',
-    status: '새로 배정' as const,
-    assignedBy: '김교수',
-    project: 'KOCCA AI Animation Pipeline',
-  },
-  {
-    title: '중간보고서 Section 2 작성',
-    description: '관련 연구 서베이 부분 작성',
-    url: '',
-    guide: 'Overleaf 프로젝트에서 작업. 3/14까지 초안 완성',
-    status: '이월' as const,
-    assignedBy: '김교수',
-    project: 'NRF GCA Narratology',
-  },
-]
-
-const externalWeeklySummary = [
-  {
-    project: 'KOCCA AI Animation Pipeline',
-    code: 'KOCCA-2025-001',
-    completedTasks: 5,
-    inProgressTasks: 3,
-    notStartedTasks: 1,
-    keyUpdates: ['Phase 2 마일스톤 달성 (3/7)', 'Asset 전달 일정 확정'],
-  },
-  {
-    project: 'Digital Heritage Archive',
-    code: 'MOC-2025-017',
-    completedTasks: 3,
-    inProgressTasks: 2,
-    notStartedTasks: 0,
-    keyUpdates: ['포인트 클라우드 변환 완료', '최종 QA 준비중'],
-  },
-]
 
 const taskStatusBadge: Record<string, { bg: string; color: string }> = {
   '완료': { bg: '#d1fae5', color: '#047857' },
@@ -516,36 +453,19 @@ export default function Weekly() {
 // Professor Weekly View
 // ═══════════════════════════════════════
 function ProfessorWeekly() {
-  const [selectedDate, setSelectedDate] = useState(new Date(2026, 2, 12)) // March 12, 2026
+  const [selectedDate, setSelectedDate] = useState(new Date())
   const weekLabel = useMemo(() => getWeekLabel(selectedDate), [selectedDate])
   const handleWeekSelect = useCallback((d: Date) => setSelectedDate(d), [])
 
-  // Compute weekStart key for localStorage
-  const weekStartKey = useMemo(() => {
-    const d = new Date(selectedDate)
-    const day = d.getDay()
-    const diff = day === 0 ? -6 : 1 - day
-    const monday = new Date(d)
-    monday.setDate(d.getDate() + diff)
-    return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`
-  }, [selectedDate])
+  // Compute weekStart key (Monday of selected week) in YYYY-MM-DD format
+  const weekStartKey = useMemo(() => formatDateKey(getMonday(selectedDate)), [selectedDate])
 
-  // Meeting notes with localStorage persistence
+  // Loading state
+  const [loading, setLoading] = useState(true)
+
+  // Meeting notes with API persistence (localStorage fallback)
   const [meetingNotes, setMeetingNotes] = useState('')
   const [notesSaved, setNotesSaved] = useState(false)
-
-  // Load meeting notes from localStorage when week changes
-  useEffect(() => {
-    const saved = localStorage.getItem(`weekly-notes-${weekStartKey}`)
-    setMeetingNotes(saved || '')
-    setNotesSaved(false)
-  }, [weekStartKey])
-
-  function handleSaveMeetingNotes() {
-    localStorage.setItem(`weekly-notes-${weekStartKey}`, meetingNotes)
-    setNotesSaved(true)
-    setTimeout(() => setNotesSaved(false), 2000)
-  }
 
   // Summary view mode
   const [summaryView, setSummaryView] = useState<'project' | 'all'>('project')
@@ -554,114 +474,203 @@ function ProfessorWeekly() {
   const [dndProjectFilter, setDndProjectFilter] = useState<string>('전체')
 
   // Dynamic students and projects from API
-  const [apiStudents, setApiStudents] = useState<StudentInfo[]>(mockStudents)
-  const [apiProjects, setApiProjects] = useState<string[]>(projectList)
+  const [apiStudents, setApiStudents] = useState<StudentInfo[]>([])
+  const [apiProjects, setApiProjects] = useState<string[]>([])
   const [apiProjectObjects, setApiProjectObjects] = useState<{ id: string; name: string }[]>([])
 
   // Task pool state
-  const [allTasks, setAllTasks] = useState<TaskItem[]>([...initialPoolTasks, ...initialCarryOverTasks])
-  const [assignments, setAssignments] = useState<Record<string, string[]>>(initialAssignments)
+  const [allTasks, setAllTasks] = useState<TaskItem[]>([])
+  const [assignments, setAssignments] = useState<Record<string, string[]>>({})
 
   // Student summaries from API
-  const [apiStudentSummaries, setApiStudentSummaries] = useState(studentSummaries)
+  const [apiStudentSummaries, setApiStudentSummaries] = useState<StudentSummary[]>([])
+
+  // Marked dates for calendar
+  const [weeklyMarkedDates] = useState<Record<string, 'submitted' | 'partial' | 'none'>>({})
+
+  // Load meeting notes when week changes
+  useEffect(() => {
+    // Try API first, fallback to localStorage
+    const loadNotes = async () => {
+      try {
+        const res: any = await (api as any).weekly?.getNotes(weekStartKey)
+        if (res && res.content !== undefined) {
+          setMeetingNotes(res.content || '')
+          return
+        }
+      } catch {
+        // API not available yet
+      }
+      // Fallback to localStorage
+      const saved = localStorage.getItem(`weekly-notes-${weekStartKey}`)
+      setMeetingNotes(saved || '')
+    }
+    loadNotes()
+    setNotesSaved(false)
+  }, [weekStartKey])
+
+  async function handleSaveMeetingNotes() {
+    // Save to localStorage always
+    localStorage.setItem(`weekly-notes-${weekStartKey}`, meetingNotes)
+    // Try API save
+    try {
+      await (api as any).weekly?.saveNotes(weekStartKey, meetingNotes)
+    } catch {
+      // API not available yet, localStorage save is enough
+    }
+    setNotesSaved(true)
+    setTimeout(() => setNotesSaved(false), 2000)
+  }
 
   // Load students, projects, and tasks from API
   useEffect(() => {
-    Promise.all([
-      api.users.list({ role: 'student' }).catch(() => ({ items: [] })),
-      api.projects.list().catch(() => ({ items: [] })),
-      api.tasks.my().catch(() => ({ items: [] })),
-    ]).then(([usersRes, projectsRes, tasksRes]: [any, any, any]) => {
-      const students: any[] = usersRes.items || (Array.isArray(usersRes) ? usersRes : [])
-      const projects: any[] = projectsRes.items || (Array.isArray(projectsRes) ? projectsRes : [])
-      const tasks: any[] = tasksRes.items || (Array.isArray(tasksRes) ? tasksRes : [])
+    setLoading(true)
 
-      if (students.length > 0) {
-        const mapped: StudentInfo[] = students.map((u: any) => ({
+    const fetchData = async () => {
+      try {
+        const [usersRes, projectsRes] = await Promise.all([
+          api.users.list({ role: 'student' }).catch(() => ({ items: [] })),
+          api.projects.list().catch(() => ({ items: [] })),
+        ])
+
+        const students: any[] = (usersRes as any).items || (usersRes as any).data || (Array.isArray(usersRes) ? usersRes : [])
+        const projects: any[] = (projectsRes as any).items || (projectsRes as any).data || (Array.isArray(projectsRes) ? projectsRes : [])
+
+        // Map projects
+        const projectNames = projects.map((p: any) => p.name || p.title || p.id)
+        const projectObjects = projects.map((p: any) => ({
+          id: String(p.id),
+          name: p.name || p.title || p.id,
+        }))
+        setApiProjects(projectNames)
+        setApiProjectObjects(projectObjects)
+
+        // Fetch tasks for each project
+        let allApiTasks: any[] = []
+        if (projects.length > 0) {
+          const taskResults = await Promise.all(
+            projects.map((p: any) =>
+              api.tasks.listByProject(String(p.id), { week_start: weekStartKey }).catch(() => ({ items: [], data: [] }))
+            )
+          )
+          for (let i = 0; i < taskResults.length; i++) {
+            const res: any = taskResults[i]
+            const tasks: any[] = res.items || res.data || (Array.isArray(res) ? res : [])
+            const projName = projectObjects[i]?.name
+            allApiTasks.push(...tasks.map((t: any) => ({ ...t, _projectName: projName })))
+          }
+        }
+
+        // Map students
+        const mappedStudents: StudentInfo[] = students.map((u: any) => ({
           id: u.id,
-          name: u.name || u.email || u.id,
+          name: u.display_name || u.name || u.email || u.id,
           badge: (u.role === 'student' ? '지도학생' : '프로젝트') as '지도학생' | '프로젝트',
           project: u.project_name || undefined,
         }))
-        setApiStudents(mapped)
-        // Initialize assignments for new students
-        setAssignments((prev) => {
-          const next = { ...prev }
-          mapped.forEach((s) => {
-            if (!(s.name in next)) next[s.name] = []
-          })
-          return next
-        })
 
-        // Build student summaries from API data
-        // For each student, count their tasks by status
-        const summaries = mapped.map((s) => {
-          const studentTasks = tasks.filter((t: any) => {
-            const assignees: any[] = t.assignees || []
-            return assignees.some((a: any) => a.user_id === s.id || a.id === s.id)
-          })
-          return {
-            name: s.name,
-            done: studentTasks.filter((t: any) => t.status === 'done' || t.status === 'completed').length,
-            inProgress: studentTasks.filter((t: any) => t.status === 'in_progress').length,
-            notStarted: studentTasks.filter((t: any) => t.status === 'todo' || t.status === 'not_started' || !t.status).length,
-            dailyCount: 0, // TODO: fetch from daily logs API
-            project: s.project,
+        // If we have students, also try to determine their project membership
+        if (mappedStudents.length > 0 && projects.length > 0) {
+          try {
+            const memberResults = await Promise.all(
+              projects.map((p: any) =>
+                api.projects.members(String(p.id)).catch(() => ({ items: [], data: [] }))
+              )
+            )
+            for (let i = 0; i < memberResults.length; i++) {
+              const res: any = memberResults[i]
+              const members: any[] = res.items || res.data || (Array.isArray(res) ? res : [])
+              const projName = projectObjects[i]?.name
+              for (const m of members) {
+                const memberId = m.user_id || m.id
+                const student = mappedStudents.find(s => s.id === memberId)
+                if (student && !student.project) {
+                  student.project = projName
+                }
+              }
+            }
+          } catch {
+            // Project members API might not be available
           }
-        })
-        if (summaries.length > 0) {
-          setApiStudentSummaries(summaries)
         }
-      }
 
-      if (projects.length > 0) {
-        setApiProjects(projects.map((p: any) => p.name || p.title || p.id))
-        setApiProjectObjects(projects.map((p: any) => ({
-          id: String(p.id),
-          name: p.name || p.title || p.id,
-        })))
-      }
+        setApiStudents(mappedStudents)
 
-      if (tasks.length > 0) {
-        const mappedTasks: TaskItem[] = tasks.map((t: any) => ({
-          id: String(t.id),
-          title: t.title,
-          description: t.description || '',
-          type: (t.task_type || t.type || '기타') as TaskType,
-          url: t.reference_url || t.url || undefined,
-          guide: t.guide || undefined,
-          carryOver: t.is_carry_over || t.carryOver || false,
-          project: t.project_name || t.project || undefined,
-        }))
+        // Map tasks
+        const mappedTasks: TaskItem[] = allApiTasks.map((t: any) => mapApiTaskToTaskItem(t, t._projectName))
         setAllTasks(mappedTasks)
 
         // Build assignments from task assignees
         const newAssignments: Record<string, string[]> = {}
-        for (const t of tasks) {
+        // Initialize all students with empty arrays
+        for (const s of mappedStudents) {
+          newAssignments[s.name] = []
+        }
+        for (const t of allApiTasks) {
           const assignees: any[] = t.assignees || []
           for (const a of assignees) {
             const userId = a.user_id || a.id
-            // Find the student name by id
-            const student = students.find((s: any) => s.id === userId)
-            const studentName = student ? (student.name || student.email || student.id) : null
-            if (studentName) {
-              if (!newAssignments[studentName]) newAssignments[studentName] = []
-              newAssignments[studentName].push(String(t.id))
+            const student = mappedStudents.find(s => s.id === userId)
+            if (student) {
+              if (!newAssignments[student.name]) newAssignments[student.name] = []
+              newAssignments[student.name].push(String(t.id))
             }
           }
         }
-        // Merge with empty arrays for students without assignments
-        const merged: Record<string, string[]> = {}
-        const allStudents = students.length > 0
-          ? students.map((s: any) => s.name || s.email || s.id)
-          : mockStudents.map((s) => s.name)
-        for (const name of allStudents) {
-          merged[name] = newAssignments[name] || []
+        setAssignments(newAssignments)
+
+        // Build student summaries
+        // Try dedicated API first
+        let summaries: StudentSummary[] = []
+        try {
+          const summaryRes: any = await (api as any).tasks?.summaryByStudent(weekStartKey)
+          if (summaryRes && Array.isArray(summaryRes.data || summaryRes.items || summaryRes)) {
+            const rawSummaries: any[] = summaryRes.data || summaryRes.items || summaryRes
+            summaries = rawSummaries.map((s: any) => ({
+              name: s.student_name || s.name || '',
+              done: s.done || s.completed || 0,
+              inProgress: s.in_progress || s.inProgress || 0,
+              notStarted: s.not_started || s.notStarted || s.todo || 0,
+              dailyCount: s.daily_count || s.dailyCount || 0,
+              project: s.project || s.project_name || undefined,
+            }))
+          }
+        } catch {
+          // API not available, compute from tasks
         }
-        setAssignments(merged)
+
+        if (summaries.length === 0) {
+          // Compute summaries from fetched tasks
+          summaries = mappedStudents.map(s => {
+            const studentTaskIds = newAssignments[s.name] || []
+            const studentTasks = allApiTasks.filter((t: any) => studentTaskIds.includes(String(t.id)))
+            return {
+              name: s.name,
+              done: studentTasks.filter((t: any) => t.status === 'done' || t.status === 'completed').length,
+              inProgress: studentTasks.filter((t: any) => t.status === 'in_progress').length,
+              notStarted: studentTasks.filter((t: any) => t.status === 'todo' || t.status === 'not_started' || !t.status).length,
+              dailyCount: 0,
+              project: s.project,
+            }
+          })
+        }
+        setApiStudentSummaries(summaries)
+
+      } catch {
+        // Total fetch failure - show empty state
+        setApiStudents([])
+        setApiProjects([])
+        setApiProjectObjects([])
+        setAllTasks([])
+        setAssignments({})
+        setApiStudentSummaries([])
+      } finally {
+        setLoading(false)
       }
-    })
-  }, [])
+    }
+
+    fetchData()
+  }, [weekStartKey])
 
   // New task form
   const [showNewTask, setShowNewTask] = useState(false)
@@ -709,7 +718,7 @@ function ProfessorWeekly() {
 
   // Group student summaries by project
   const projectGroupedSummaries = useMemo(() => {
-    const groups: { project: string; students: typeof studentSummaries }[] = []
+    const groups: { project: string; students: StudentSummary[] }[] = []
     for (const proj of apiProjects) {
       const students = apiStudentSummaries.filter(s => s.project === proj)
       if (students.length > 0) groups.push({ project: proj, students })
@@ -884,7 +893,7 @@ function ProfessorWeekly() {
   )
 
   // Render a single student row
-  const renderStudentRow = (s: typeof studentSummaries[0], idx: number, total: number) => (
+  const renderStudentRow = (s: StudentSummary, idx: number, total: number) => (
     <div
       key={s.name}
       style={{
@@ -962,314 +971,334 @@ function ProfessorWeekly() {
           </div>
         </div>
 
-        {/* Student Summary Table */}
-        <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
-          <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>지난주 학생별 요약</h3>
-              <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>자동 집계 결과</p>
-            </div>
-            <ViewToggle
-              options={[
-                { value: 'project', label: '프로젝트별 보기' },
-                { value: 'all', label: '전체 보기' },
-              ]}
-              value={summaryView}
-              onChange={(v) => setSummaryView(v as 'project' | 'all')}
-            />
+        {/* Loading state */}
+        {loading && (
+          <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8', fontSize: 15 }}>
+            로딩 중...
           </div>
+        )}
 
-          {summaryView === 'all' ? (
-            <>
-              {summaryHeaderRow}
-              {apiStudentSummaries.map((s, idx) => renderStudentRow(s, idx, apiStudentSummaries.length))}
-            </>
-          ) : (
-            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {projectGroupedSummaries.map((group) => {
-                const totalDone = group.students.reduce((a, s) => a + s.done, 0)
-                const totalInProgress = group.students.reduce((a, s) => a + s.inProgress, 0)
-                const totalNotStarted = group.students.reduce((a, s) => a + s.notStarted, 0)
-                const subtitle = `완료 ${totalDone} / 진행 ${totalInProgress} / 미시작 ${totalNotStarted}`
-                return (
-                  <CollapsibleSection
-                    key={group.project}
-                    title={group.project}
-                    icon={group.project === '프로젝트 미배정' ? undefined : '\uD83D\uDCC1'}
-                    subtitle={subtitle}
-                    defaultOpen={true}
-                  >
-                    <div style={{ ...cardStyle, overflow: 'hidden' }}>
-                      {summaryHeaderRow}
-                      {group.students.map((s, idx) => renderStudentRow(s, idx, group.students.length))}
-                    </div>
-                  </CollapsibleSection>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* ═══ Drag & Drop Area: Task Pool (left) + Students (right) ═══ */}
-        <div
-          className="opacity-0 animate-fade-in stagger-3 weekly-dnd-layout"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 24,
-            marginBottom: 28,
-            alignItems: 'start',
-          }}
-        >
-          {/* Left: Task Pool */}
-          <div style={{ ...cardStyle, overflow: 'hidden' }}>
-            <div style={{
-              padding: '20px 24px', borderBottom: '1px solid #f1f5f9',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            }}>
-              <div>
-                <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>태스크 풀</h3>
-                <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>드래그하여 학생에게 배정</p>
-              </div>
-              <button
-                onClick={() => setShowNewTask(!showNewTask)}
-                style={{
-                  padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                  border: 'none', cursor: 'pointer',
-                  background: showNewTask ? '#f1f5f9' : '#4f46e5',
-                  color: showNewTask ? '#64748b' : '#fff',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {showNewTask ? '취소' : '+ 새 태스크 추가'}
-              </button>
-            </div>
-
-            {/* New Task Inline Form */}
-            {showNewTask && (
-              <div style={{
-                padding: '20px 24px', borderBottom: '1px solid #f1f5f9',
-                background: '#f8fafc',
-                display: 'flex', flexDirection: 'column', gap: 12,
-              }}>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <select
-                    value={newType}
-                    onChange={(e) => setNewType(e.target.value as TaskType)}
-                    style={{
-                      padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
-                      fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
-                    }}
-                  >
-                    <option value="연구">연구</option>
-                    <option value="논문리뷰">논문리뷰</option>
-                    <option value="개발">개발</option>
-                    <option value="기타">기타</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="태스크 제목"
-                    style={{
-                      flex: 1, padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #e2e8f0', fontSize: 13,
-                      background: '#fff', color: '#0f172a', outline: 'none',
-                    }}
-                  />
+        {!loading && (
+          <>
+            {/* Student Summary Table */}
+            <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
+              <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>지난주 학생별 요약</h3>
+                  <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>자동 집계 결과</p>
                 </div>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <select
-                    value={newProject}
-                    onChange={(e) => setNewProject(e.target.value)}
-                    style={{
-                      flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
-                      fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
-                    }}
-                  >
-                    <option value="">프로젝트 선택</option>
-                    {apiProjectObjects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={newPriority}
-                    onChange={(e) => setNewPriority(e.target.value as 'low' | 'medium' | 'high' | 'urgent')}
-                    style={{
-                      padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
-                      fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
-                    }}
-                  >
-                    <option value="low">낮음</option>
-                    <option value="medium">보통</option>
-                    <option value="high">높음</option>
-                    <option value="urgent">긴급</option>
-                  </select>
-                </div>
-                <input
-                  type="text"
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  placeholder="설명"
-                  style={{
-                    width: '100%', padding: '8px 12px', borderRadius: 8,
-                    border: '1px solid #e2e8f0', fontSize: 13,
-                    background: '#fff', color: '#0f172a', outline: 'none',
-                  }}
+                <ViewToggle
+                  options={[
+                    { value: 'project', label: '프로젝트별 보기' },
+                    { value: 'all', label: '전체 보기' },
+                  ]}
+                  value={summaryView}
+                  onChange={(v) => setSummaryView(v as 'project' | 'all')}
                 />
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <input
-                    type="url"
-                    value={newUrl}
-                    onChange={(e) => setNewUrl(e.target.value)}
-                    placeholder="URL (선택)"
-                    style={{
-                      flex: 1, padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #e2e8f0', fontSize: 13,
-                      background: '#fff', color: '#0f172a', outline: 'none',
-                    }}
-                  />
-                  <input
-                    type="text"
-                    value={newGuide}
-                    onChange={(e) => setNewGuide(e.target.value)}
-                    placeholder="가이드 (선택)"
-                    style={{
-                      flex: 1, padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #e2e8f0', fontSize: 13,
-                      background: '#fff', color: '#0f172a', outline: 'none',
-                    }}
-                  />
-                </div>
-                <button
-                  onClick={addNewTask}
-                  disabled={isCreatingTask || !newTitle.trim()}
-                  style={{
-                    padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                    border: 'none', cursor: isCreatingTask ? 'wait' : 'pointer', alignSelf: 'flex-end',
-                    background: isCreatingTask ? '#94a3b8' : '#4f46e5', color: '#fff',
-                    transition: 'all 0.15s',
-                    opacity: !newTitle.trim() ? 0.5 : 1,
-                  }}
-                  onMouseEnter={(e) => { if (!isCreatingTask) e.currentTarget.style.background = '#3730a3' }}
-                  onMouseLeave={(e) => { if (!isCreatingTask) e.currentTarget.style.background = '#4f46e5' }}
-                >
-                  {isCreatingTask ? '생성 중...' : '추가'}
-                </button>
               </div>
-            )}
 
-            {/* Pool tasks */}
-            <DroppableZone id="task-pool">
-              <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {poolTasks.length === 0 && carryOverPoolTasks.length === 0 && (
-                  <p style={{ fontSize: 13, color: '#cbd5e1', textAlign: 'center', padding: '20px 0', fontStyle: 'italic' }}>
-                    모든 태스크가 배정되었습니다
-                  </p>
+              {apiStudentSummaries.length === 0 ? (
+                <div style={{ padding: '40px 28px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+                  학생 데이터가 없습니다
+                </div>
+              ) : summaryView === 'all' ? (
+                <>
+                  {summaryHeaderRow}
+                  {apiStudentSummaries.map((s, idx) => renderStudentRow(s, idx, apiStudentSummaries.length))}
+                </>
+              ) : (
+                <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {projectGroupedSummaries.map((group) => {
+                    const totalDone = group.students.reduce((a, s) => a + s.done, 0)
+                    const totalInProgress = group.students.reduce((a, s) => a + s.inProgress, 0)
+                    const totalNotStarted = group.students.reduce((a, s) => a + s.notStarted, 0)
+                    const subtitle = `완료 ${totalDone} / 진행 ${totalInProgress} / 미시작 ${totalNotStarted}`
+                    return (
+                      <CollapsibleSection
+                        key={group.project}
+                        title={group.project}
+                        icon={group.project === '프로젝트 미배정' ? undefined : '\uD83D\uDCC1'}
+                        subtitle={subtitle}
+                        defaultOpen={true}
+                      >
+                        <div style={{ ...cardStyle, overflow: 'hidden' }}>
+                          {summaryHeaderRow}
+                          {group.students.map((s, idx) => renderStudentRow(s, idx, group.students.length))}
+                        </div>
+                      </CollapsibleSection>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ═══ Drag & Drop Area: Task Pool (left) + Students (right) ═══ */}
+            <div
+              className="opacity-0 animate-fade-in stagger-3 weekly-dnd-layout"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 24,
+                marginBottom: 28,
+                alignItems: 'start',
+              }}
+            >
+              {/* Left: Task Pool */}
+              <div style={{ ...cardStyle, overflow: 'hidden' }}>
+                <div style={{
+                  padding: '20px 24px', borderBottom: '1px solid #f1f5f9',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                  <div>
+                    <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>태스크 풀</h3>
+                    <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>드래그하여 학생에게 배정</p>
+                  </div>
+                  <button
+                    onClick={() => setShowNewTask(!showNewTask)}
+                    style={{
+                      padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                      border: 'none', cursor: 'pointer',
+                      background: showNewTask ? '#f1f5f9' : '#4f46e5',
+                      color: showNewTask ? '#64748b' : '#fff',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {showNewTask ? '취소' : '+ 새 태스크 추가'}
+                  </button>
+                </div>
+
+                {/* New Task Inline Form */}
+                {showNewTask && (
+                  <div style={{
+                    padding: '20px 24px', borderBottom: '1px solid #f1f5f9',
+                    background: '#f8fafc',
+                    display: 'flex', flexDirection: 'column', gap: 12,
+                  }}>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <select
+                        value={newType}
+                        onChange={(e) => setNewType(e.target.value as TaskType)}
+                        style={{
+                          padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
+                          fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
+                        }}
+                      >
+                        <option value="연구">연구</option>
+                        <option value="논문리뷰">논문리뷰</option>
+                        <option value="개발">개발</option>
+                        <option value="기타">기타</option>
+                      </select>
+                      <input
+                        type="text"
+                        value={newTitle}
+                        onChange={(e) => setNewTitle(e.target.value)}
+                        placeholder="태스크 제목"
+                        style={{
+                          flex: 1, padding: '8px 12px', borderRadius: 8,
+                          border: '1px solid #e2e8f0', fontSize: 13,
+                          background: '#fff', color: '#0f172a', outline: 'none',
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <select
+                        value={newProject}
+                        onChange={(e) => setNewProject(e.target.value)}
+                        style={{
+                          flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
+                          fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
+                        }}
+                      >
+                        <option value="">프로젝트 선택</option>
+                        {apiProjectObjects.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={newPriority}
+                        onChange={(e) => setNewPriority(e.target.value as 'low' | 'medium' | 'high' | 'urgent')}
+                        style={{
+                          padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
+                          fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
+                        }}
+                      >
+                        <option value="low">낮음</option>
+                        <option value="medium">보통</option>
+                        <option value="high">높음</option>
+                        <option value="urgent">긴급</option>
+                      </select>
+                    </div>
+                    <input
+                      type="text"
+                      value={newDesc}
+                      onChange={(e) => setNewDesc(e.target.value)}
+                      placeholder="설명"
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8,
+                        border: '1px solid #e2e8f0', fontSize: 13,
+                        background: '#fff', color: '#0f172a', outline: 'none',
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <input
+                        type="url"
+                        value={newUrl}
+                        onChange={(e) => setNewUrl(e.target.value)}
+                        placeholder="URL (선택)"
+                        style={{
+                          flex: 1, padding: '8px 12px', borderRadius: 8,
+                          border: '1px solid #e2e8f0', fontSize: 13,
+                          background: '#fff', color: '#0f172a', outline: 'none',
+                        }}
+                      />
+                      <input
+                        type="text"
+                        value={newGuide}
+                        onChange={(e) => setNewGuide(e.target.value)}
+                        placeholder="가이드 (선택)"
+                        style={{
+                          flex: 1, padding: '8px 12px', borderRadius: 8,
+                          border: '1px solid #e2e8f0', fontSize: 13,
+                          background: '#fff', color: '#0f172a', outline: 'none',
+                        }}
+                      />
+                    </div>
+                    <button
+                      onClick={addNewTask}
+                      disabled={isCreatingTask || !newTitle.trim()}
+                      style={{
+                        padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                        border: 'none', cursor: isCreatingTask ? 'wait' : 'pointer', alignSelf: 'flex-end',
+                        background: isCreatingTask ? '#94a3b8' : '#4f46e5', color: '#fff',
+                        transition: 'all 0.15s',
+                        opacity: !newTitle.trim() ? 0.5 : 1,
+                      }}
+                      onMouseEnter={(e) => { if (!isCreatingTask) e.currentTarget.style.background = '#3730a3' }}
+                      onMouseLeave={(e) => { if (!isCreatingTask) e.currentTarget.style.background = '#4f46e5' }}
+                    >
+                      {isCreatingTask ? '생성 중...' : '추가'}
+                    </button>
+                  </div>
                 )}
 
-                {poolTasks.map((task) => (
-                  <DraggableTaskCard key={task.id} task={task} />
-                ))}
+                {/* Pool tasks */}
+                <DroppableZone id="task-pool">
+                  <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {poolTasks.length === 0 && carryOverPoolTasks.length === 0 && (
+                      <p style={{ fontSize: 13, color: '#cbd5e1', textAlign: 'center', padding: '20px 0', fontStyle: 'italic' }}>
+                        모든 태스크가 배정되었습니다
+                      </p>
+                    )}
 
-                {/* Carry-over section */}
-                {carryOverPoolTasks.length > 0 && (
-                  <>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      marginTop: poolTasks.length > 0 ? 8 : 0,
-                    }}>
-                      <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#b45309', whiteSpace: 'nowrap' }}>
-                        이월된 태스크
-                      </span>
-                      <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
-                    </div>
-                    {carryOverPoolTasks.map((task) => (
+                    {poolTasks.map((task) => (
                       <DraggableTaskCard key={task.id} task={task} />
                     ))}
-                  </>
+
+                    {/* Carry-over section */}
+                    {carryOverPoolTasks.length > 0 && (
+                      <>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          marginTop: poolTasks.length > 0 ? 8 : 0,
+                        }}>
+                          <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#b45309', whiteSpace: 'nowrap' }}>
+                            이월된 태스크
+                          </span>
+                          <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
+                        </div>
+                        {carryOverPoolTasks.map((task) => (
+                          <DraggableTaskCard key={task.id} task={task} />
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </DroppableZone>
+              </div>
+
+              {/* Right: Students */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ padding: '0 0 4px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>학생</h3>
+                    <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>태스크를 드롭하여 배정</p>
+                  </div>
+                  <select
+                    value={dndProjectFilter}
+                    onChange={(e) => setDndProjectFilter(e.target.value)}
+                    style={{
+                      padding: '6px 10px', borderRadius: 8,
+                      border: '1px solid #e2e8f0', fontSize: 12, color: '#0f172a',
+                      background: '#fff', outline: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    <option value="전체">전체</option>
+                    {apiProjects.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                    <option value="프로젝트 미배정">프로젝트 미배정</option>
+                  </select>
+                </div>
+                {filteredStudents.length === 0 && (
+                  <div style={{ ...cardStyle, padding: '40px 20px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+                    학생이 없습니다
+                  </div>
                 )}
-              </div>
-            </DroppableZone>
-          </div>
-
-          {/* Right: Students */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ padding: '0 0 4px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-              <div>
-                <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>학생</h3>
-                <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>태스크를 드롭하여 배정</p>
-              </div>
-              <select
-                value={dndProjectFilter}
-                onChange={(e) => setDndProjectFilter(e.target.value)}
-                style={{
-                  padding: '6px 10px', borderRadius: 8,
-                  border: '1px solid #e2e8f0', fontSize: 12, color: '#0f172a',
-                  background: '#fff', outline: 'none', cursor: 'pointer',
-                }}
-              >
-                <option value="전체">전체</option>
-                {apiProjects.map((p) => (
-                  <option key={p} value={p}>{p}</option>
+                {filteredStudents.map((student) => (
+                  <StudentDropCard
+                    key={student.name}
+                    student={student}
+                    assignedTasks={assignments[student.name] || []}
+                    allTasks={allTasks}
+                  />
                 ))}
-                <option value="프로젝트 미배정">프로젝트 미배정</option>
-              </select>
+              </div>
             </div>
-            {filteredStudents.map((student) => (
-              <StudentDropCard
-                key={student.name}
-                student={student}
-                assignedTasks={assignments[student.name] || []}
-                allTasks={allTasks}
-              />
-            ))}
-          </div>
-        </div>
 
-        {/* Meeting Notes */}
-        <div className="opacity-0 animate-fade-in stagger-4" style={{ ...cardStyle, overflow: 'hidden' }}>
-          <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-            <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>회의록</h3>
-            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>이번 주 회의 내용을 기록하세요</p>
-          </div>
-          <div style={{ padding: 28 }}>
-            <textarea
-              value={meetingNotes}
-              onChange={(e) => setMeetingNotes(e.target.value)}
-              placeholder="회의 내용을 자유롭게 기록하세요..."
-              rows={6}
-              style={{
-                width: '100%', padding: '14px', borderRadius: 12,
-                border: '1px solid #e2e8f0', background: '#f8fafc',
-                fontSize: 14, color: '#0f172a', outline: 'none',
-                resize: 'vertical' as const, fontFamily: 'inherit',
-                lineHeight: 1.7,
-              }}
-            />
-            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-              {notesSaved && (
-                <span style={{ fontSize: 13, color: '#059669', fontWeight: 500 }}>저장되었습니다</span>
-              )}
-              <button
-                onClick={handleSaveMeetingNotes}
-                style={{
-                  padding: '10px 24px', borderRadius: 10,
-                  fontSize: 14, fontWeight: 600,
-                  border: 'none', cursor: 'pointer',
-                  background: '#059669', color: '#fff',
-                  boxShadow: '0 2px 8px rgba(5,150,105,0.25)',
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#047857' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#059669' }}
-              >
-                저장
-              </button>
+            {/* Meeting Notes */}
+            <div className="opacity-0 animate-fade-in stagger-4" style={{ ...cardStyle, overflow: 'hidden' }}>
+              <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
+                <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>회의록</h3>
+                <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>이번 주 회의 내용을 기록하세요</p>
+              </div>
+              <div style={{ padding: 28 }}>
+                <textarea
+                  value={meetingNotes}
+                  onChange={(e) => setMeetingNotes(e.target.value)}
+                  placeholder="회의 내용을 자유롭게 기록하세요..."
+                  rows={6}
+                  style={{
+                    width: '100%', padding: '14px', borderRadius: 12,
+                    border: '1px solid #e2e8f0', background: '#f8fafc',
+                    fontSize: 14, color: '#0f172a', outline: 'none',
+                    resize: 'vertical' as const, fontFamily: 'inherit',
+                    lineHeight: 1.7,
+                  }}
+                />
+                <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+                  {notesSaved && (
+                    <span style={{ fontSize: 13, color: '#059669', fontWeight: 500 }}>저장되었습니다</span>
+                  )}
+                  <button
+                    onClick={handleSaveMeetingNotes}
+                    style={{
+                      padding: '10px 24px', borderRadius: 10,
+                      fontSize: 14, fontWeight: 600,
+                      border: 'none', cursor: 'pointer',
+                      background: '#059669', color: '#fff',
+                      boxShadow: '0 2px 8px rgba(5,150,105,0.25)',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#047857' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = '#059669' }}
+                  >
+                    저장
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
 
         <style>{`
           @media (max-width: 900px) {
@@ -1295,7 +1324,11 @@ function StudentWeekly() {
   const [weekPlan, setWeekPlan] = useState('')
   const [planSaved, setPlanSaved] = useState(false)
   const [taskView, setTaskView] = useState<'project' | 'all'>('project')
-  const [assignedTasks, setAssignedTasks] = useState(myAssignedTasks)
+  const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([])
+  const [loading, setLoading] = useState(true)
+
+  // Last week summary computed from tasks
+  const [myLastWeekSummary, setMyLastWeekSummary] = useState({ done: 0, inProgress: 0, notStarted: 0, dailyCount: 0 })
 
   // Load week plan from localStorage
   useEffect(() => {
@@ -1309,27 +1342,74 @@ function StudentWeekly() {
     setTimeout(() => setPlanSaved(false), 2000)
   }
 
+  // Fetch tasks from API
   useEffect(() => {
-    api.tasks.my().then((res: any) => {
-      const tasks: any[] = res.items || (Array.isArray(res) ? res : [])
-      if (tasks.length > 0) {
-        setAssignedTasks(tasks.map((t: any) => ({
+    setLoading(true)
+
+    const fetchData = async () => {
+      try {
+        const res: any = await api.tasks.my()
+        const tasks: any[] = res.items || res.data || (Array.isArray(res) ? res : [])
+
+        const mapped: AssignedTask[] = tasks.map((t: any) => ({
           title: t.title,
           description: t.description || '',
           url: t.reference_url || t.url || '',
           guide: t.guide || '',
-          status: t.status === 'done' ? '완료' : t.status === 'in_progress' ? '진행중' : t.status === 'carry_over' ? '이월' : '새로 배정',
+          status: t.status === 'done' || t.status === 'completed'
+            ? '완료'
+            : t.status === 'in_progress'
+              ? '진행중'
+              : t.status === 'carry_over' || t.is_carry_over
+                ? '이월'
+                : t.status === 'todo' || t.status === 'not_started'
+                  ? '새로 배정'
+                  : '새로 배정',
           assignedBy: t.assigned_by_name || t.assigned_by || '',
           project: t.project_name || t.project || '',
-        })))
+        }))
+        setAssignedTasks(mapped)
+
+        // Compute last week summary from tasks
+        const done = mapped.filter(t => t.status === '완료').length
+        const inProgress = mapped.filter(t => t.status === '진행중').length
+        const notStarted = mapped.filter(t => t.status === '새로 배정' || t.status === '미시작').length
+        setMyLastWeekSummary({ done, inProgress, notStarted, dailyCount: 0 })
+
+        // Try to get summary from dedicated API
+        try {
+          const weekStart = formatDateKey(getMonday(new Date()))
+          const summaryRes: any = await (api as any).tasks?.summaryByStudent(weekStart)
+          if (summaryRes) {
+            const data = summaryRes.data || summaryRes.items || summaryRes
+            if (data && !Array.isArray(data)) {
+              setMyLastWeekSummary({
+                done: data.done || data.completed || done,
+                inProgress: data.in_progress || data.inProgress || inProgress,
+                notStarted: data.not_started || data.notStarted || data.todo || notStarted,
+                dailyCount: data.daily_count || data.dailyCount || 0,
+              })
+            }
+          }
+        } catch {
+          // API not available yet
+        }
+      } catch {
+        // API failed - show empty state
+        setAssignedTasks([])
+        setMyLastWeekSummary({ done: 0, inProgress: 0, notStarted: 0, dailyCount: 0 })
+      } finally {
+        setLoading(false)
       }
-    }).catch(() => {})
+    }
+
+    fetchData()
   }, [])
 
   // Group assigned tasks by project
   const projectGroupedTasks = useMemo(() => {
-    const groups: { project: string; tasks: typeof myAssignedTasks }[] = []
-    const projectMap = new Map<string, typeof myAssignedTasks>()
+    const groups: { project: string; tasks: AssignedTask[] }[] = []
+    const projectMap = new Map<string, AssignedTask[]>()
     for (const task of assignedTasks) {
       const proj = task.project || '프로젝트 없음'
       if (!projectMap.has(proj)) projectMap.set(proj, [])
@@ -1341,7 +1421,7 @@ function StudentWeekly() {
     return groups
   }, [assignedTasks])
 
-  const renderTaskCard = (task: typeof myAssignedTasks[0], idx: number, total: number) => {
+  const renderTaskCard = (task: AssignedTask, idx: number, total: number) => {
     const badge = taskStatusBadge[task.status] || taskStatusBadge['미시작']
     return (
       <div
@@ -1407,105 +1487,117 @@ function StudentWeekly() {
         </p>
       </div>
 
-      {/* Last Week Summary */}
-      <div className="opacity-0 animate-fade-in stagger-1" style={{ marginBottom: 28 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
-          {[
-            { label: '완료', value: myLastWeekSummary.done, bg: '#d1fae5', color: '#047857', accent: '#059669' },
-            { label: '진행중', value: myLastWeekSummary.inProgress, bg: '#e0e7ff', color: '#4338ca', accent: '#4f46e5' },
-            { label: '미시작', value: myLastWeekSummary.notStarted, bg: '#f1f5f9', color: '#64748b', accent: '#64748b' },
-            { label: '데일리 제출', value: `${myLastWeekSummary.dailyCount}/5`, bg: '#fff', color: '#0f172a', accent: '#0f172a' },
-          ].map((item) => (
-            <div key={item.label} style={{ ...cardStyle, padding: 24 }}>
-              <p style={{ fontSize: 13, fontWeight: 500, color: '#94a3b8', marginBottom: 10 }}>지난주 {item.label}</p>
-              <p style={{ fontSize: 32, fontWeight: 700, color: item.accent, letterSpacing: '-0.02em' }}>{item.value}</p>
-            </div>
-          ))}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8', fontSize: 15 }}>
+          로딩 중...
         </div>
-      </div>
-
-      {/* Assigned Tasks */}
-      <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
-        <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 배정된 태스크</h3>
-            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>{assignedTasks.length}건 배정됨</p>
-          </div>
-          {projectGroupedTasks.length > 1 && (
-            <ViewToggle
-              options={[
-                { value: 'project', label: '프로젝트별' },
-                { value: 'all', label: '전체 보기' },
-              ]}
-              value={taskView}
-              onChange={(v) => setTaskView(v as 'project' | 'all')}
-            />
-          )}
-        </div>
-
-        {taskView === 'all' || projectGroupedTasks.length <= 1 ? (
-          assignedTasks.map((task, idx) => renderTaskCard(task, idx, assignedTasks.length))
-        ) : (
-          <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {projectGroupedTasks.map((group) => (
-              <CollapsibleSection
-                key={group.project}
-                title={group.project}
-                icon={group.project === '프로젝트 없음' ? undefined : '\uD83D\uDCC1'}
-                subtitle={`${group.tasks.length}건`}
-                defaultOpen={true}
-              >
-                <div style={{ ...cardStyle, overflow: 'hidden' }}>
-                  {group.tasks.map((task, idx) => renderTaskCard(task, idx, group.tasks.length))}
+      ) : (
+        <>
+          {/* Last Week Summary */}
+          <div className="opacity-0 animate-fade-in stagger-1" style={{ marginBottom: 28 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
+              {[
+                { label: '완료', value: myLastWeekSummary.done, bg: '#d1fae5', color: '#047857', accent: '#059669' },
+                { label: '진행중', value: myLastWeekSummary.inProgress, bg: '#e0e7ff', color: '#4338ca', accent: '#4f46e5' },
+                { label: '미시작', value: myLastWeekSummary.notStarted, bg: '#f1f5f9', color: '#64748b', accent: '#64748b' },
+                { label: '데일리 제출', value: `${myLastWeekSummary.dailyCount}/5`, bg: '#fff', color: '#0f172a', accent: '#0f172a' },
+              ].map((item) => (
+                <div key={item.label} style={{ ...cardStyle, padding: 24 }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: '#94a3b8', marginBottom: 10 }}>지난주 {item.label}</p>
+                  <p style={{ fontSize: 32, fontWeight: 700, color: item.accent, letterSpacing: '-0.02em' }}>{item.value}</p>
                 </div>
-              </CollapsibleSection>
-            ))}
+              ))}
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* Week Plan */}
-      <div className="opacity-0 animate-fade-in stagger-3" style={{ ...cardStyle, overflow: 'hidden' }}>
-        <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-          <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 계획</h3>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>이번 주 목표와 계획을 작성하세요</p>
-        </div>
-        <div style={{ padding: 28 }}>
-          <textarea
-            value={weekPlan}
-            onChange={(e) => setWeekPlan(e.target.value)}
-            placeholder="이번 주 계획을 자유롭게 작성하세요..."
-            rows={5}
-            style={{
-              width: '100%', padding: '14px', borderRadius: 12,
-              border: '1px solid #e2e8f0', background: '#f8fafc',
-              fontSize: 14, color: '#0f172a', outline: 'none',
-              resize: 'vertical' as const, fontFamily: 'inherit',
-              lineHeight: 1.7,
-            }}
-          />
-          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-            {planSaved && (
-              <span style={{ fontSize: 13, color: '#059669', fontWeight: 500 }}>저장되었습니다</span>
+          {/* Assigned Tasks */}
+          <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden', marginBottom: 28 }}>
+            <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 배정된 태스크</h3>
+                <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>{assignedTasks.length}건 배정됨</p>
+              </div>
+              {projectGroupedTasks.length > 1 && (
+                <ViewToggle
+                  options={[
+                    { value: 'project', label: '프로젝트별' },
+                    { value: 'all', label: '전체 보기' },
+                  ]}
+                  value={taskView}
+                  onChange={(v) => setTaskView(v as 'project' | 'all')}
+                />
+              )}
+            </div>
+
+            {assignedTasks.length === 0 ? (
+              <div style={{ padding: '40px 28px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+                배정된 태스크가 없습니다
+              </div>
+            ) : taskView === 'all' || projectGroupedTasks.length <= 1 ? (
+              assignedTasks.map((task, idx) => renderTaskCard(task, idx, assignedTasks.length))
+            ) : (
+              <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {projectGroupedTasks.map((group) => (
+                  <CollapsibleSection
+                    key={group.project}
+                    title={group.project}
+                    icon={group.project === '프로젝트 없음' ? undefined : '\uD83D\uDCC1'}
+                    subtitle={`${group.tasks.length}건`}
+                    defaultOpen={true}
+                  >
+                    <div style={{ ...cardStyle, overflow: 'hidden' }}>
+                      {group.tasks.map((task, idx) => renderTaskCard(task, idx, group.tasks.length))}
+                    </div>
+                  </CollapsibleSection>
+                ))}
+              </div>
             )}
-            <button
-              onClick={handleSaveWeekPlan}
-              style={{
-                padding: '10px 24px', borderRadius: 10,
-                fontSize: 14, fontWeight: 600,
-                border: 'none', cursor: 'pointer',
-                background: '#059669', color: '#fff',
-                boxShadow: '0 2px 8px rgba(5,150,105,0.25)',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#047857' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = '#059669' }}
-            >
-              저장
-            </button>
           </div>
-        </div>
-      </div>
+
+          {/* Week Plan */}
+          <div className="opacity-0 animate-fade-in stagger-3" style={{ ...cardStyle, overflow: 'hidden' }}>
+            <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
+              <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 계획</h3>
+              <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>이번 주 목표와 계획을 작성하세요</p>
+            </div>
+            <div style={{ padding: 28 }}>
+              <textarea
+                value={weekPlan}
+                onChange={(e) => setWeekPlan(e.target.value)}
+                placeholder="이번 주 계획을 자유롭게 작성하세요..."
+                rows={5}
+                style={{
+                  width: '100%', padding: '14px', borderRadius: 12,
+                  border: '1px solid #e2e8f0', background: '#f8fafc',
+                  fontSize: 14, color: '#0f172a', outline: 'none',
+                  resize: 'vertical' as const, fontFamily: 'inherit',
+                  lineHeight: 1.7,
+                }}
+              />
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+                {planSaved && (
+                  <span style={{ fontSize: 13, color: '#059669', fontWeight: 500 }}>저장되었습니다</span>
+                )}
+                <button
+                  onClick={handleSaveWeekPlan}
+                  style={{
+                    padding: '10px 24px', borderRadius: 10,
+                    fontSize: 14, fontWeight: 600,
+                    border: 'none', cursor: 'pointer',
+                    background: '#059669', color: '#fff',
+                    boxShadow: '0 2px 8px rgba(5,150,105,0.25)',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = '#047857' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = '#059669' }}
+                >
+                  저장
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -1514,6 +1606,58 @@ function StudentWeekly() {
 // External Weekly View
 // ═══════════════════════════════════════
 function ExternalWeekly() {
+  const [loading, setLoading] = useState(true)
+  const [projectSummaries, setProjectSummaries] = useState<ExternalProjectSummary[]>([])
+
+  useEffect(() => {
+    setLoading(true)
+
+    const fetchData = async () => {
+      try {
+        const projectsRes: any = await api.projects.list()
+        const projects: any[] = projectsRes.items || projectsRes.data || (Array.isArray(projectsRes) ? projectsRes : [])
+
+        if (projects.length === 0) {
+          setProjectSummaries([])
+          return
+        }
+
+        // Fetch tasks for each project to compute stats
+        const taskResults = await Promise.all(
+          projects.map((p: any) =>
+            api.tasks.listByProject(String(p.id)).catch(() => ({ items: [], data: [] }))
+          )
+        )
+
+        const summaries: ExternalProjectSummary[] = projects.map((p: any, i: number) => {
+          const res: any = taskResults[i]
+          const tasks: any[] = res.items || res.data || (Array.isArray(res) ? res : [])
+
+          const completed = tasks.filter((t: any) => t.status === 'done' || t.status === 'completed').length
+          const inProgress = tasks.filter((t: any) => t.status === 'in_progress').length
+          const notStarted = tasks.filter((t: any) => t.status === 'todo' || t.status === 'not_started' || !t.status).length
+
+          return {
+            project: p.name || p.title || p.id,
+            code: p.code || p.project_code || '',
+            completedTasks: completed,
+            inProgressTasks: inProgress,
+            notStartedTasks: notStarted,
+            keyUpdates: [], // Could be populated from a separate API in the future
+          }
+        })
+
+        setProjectSummaries(summaries)
+      } catch {
+        setProjectSummaries([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [])
+
   return (
     <div>
       {/* Header */}
@@ -1526,51 +1670,65 @@ function ExternalWeekly() {
         </p>
       </div>
 
-      {/* Project summaries */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        {externalWeeklySummary.map((proj, pIdx) => (
-          <div key={proj.code} className={`opacity-0 animate-fade-in stagger-${pIdx + 1}`} style={{ ...cardStyle, overflow: 'hidden' }}>
-            <div style={{
-              padding: '20px 28px', borderBottom: '1px solid #f1f5f9',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            }}>
-              <div>
-                <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>{proj.project}</h3>
-                <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4, fontFamily: 'monospace' }}>{proj.code}</p>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8', fontSize: 15 }}>
+          로딩 중...
+        </div>
+      ) : projectSummaries.length === 0 ? (
+        <div style={{ ...cardStyle, padding: '40px 28px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+          참여 중인 프로젝트가 없습니다
+        </div>
+      ) : (
+        /* Project summaries */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {projectSummaries.map((proj, pIdx) => (
+            <div key={proj.code || pIdx} className={`opacity-0 animate-fade-in stagger-${pIdx + 1}`} style={{ ...cardStyle, overflow: 'hidden' }}>
+              <div style={{
+                padding: '20px 28px', borderBottom: '1px solid #f1f5f9',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              }}>
+                <div>
+                  <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>{proj.project}</h3>
+                  {proj.code && (
+                    <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4, fontFamily: 'monospace' }}>{proj.code}</p>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* Stats row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
-              <div style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: 24, fontWeight: 700, color: '#059669' }}>{proj.completedTasks}</p>
-                <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>완료</p>
+              {/* Stats row */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, padding: '20px 28px', borderBottom: '1px solid #f1f5f9' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ fontSize: 24, fontWeight: 700, color: '#059669' }}>{proj.completedTasks}</p>
+                  <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>완료</p>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ fontSize: 24, fontWeight: 700, color: '#4f46e5' }}>{proj.inProgressTasks}</p>
+                  <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>진행중</p>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ fontSize: 24, fontWeight: 700, color: '#64748b' }}>{proj.notStartedTasks}</p>
+                  <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>미시작</p>
+                </div>
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: 24, fontWeight: 700, color: '#4f46e5' }}>{proj.inProgressTasks}</p>
-                <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>진행중</p>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: 24, fontWeight: 700, color: '#64748b' }}>{proj.notStartedTasks}</p>
-                <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>미시작</p>
-              </div>
-            </div>
 
-            {/* Key updates */}
-            <div style={{ padding: '20px 28px' }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', marginBottom: 12 }}>주요 업데이트</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {proj.keyUpdates.map((update, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5', flexShrink: 0 }} />
-                    <span style={{ fontSize: 14, color: '#334155' }}>{update}</span>
+              {/* Key updates */}
+              {proj.keyUpdates.length > 0 && (
+                <div style={{ padding: '20px 28px' }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', marginBottom: 12 }}>주요 업데이트</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {proj.keyUpdates.map((update, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5', flexShrink: 0 }} />
+                        <span style={{ fontSize: 14, color: '#334155' }}>{update}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

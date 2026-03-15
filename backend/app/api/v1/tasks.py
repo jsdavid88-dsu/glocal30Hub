@@ -1,7 +1,9 @@
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,6 +23,14 @@ from app.schemas.task import (
     TaskSummaryResponse,
     TaskUpdate,
 )
+
+
+# ── Request schemas for new endpoints ─────────────────────────────────────────
+
+
+class TaskCarryoverRequest(BaseModel):
+    task_ids: list[uuid.UUID]
+    new_due_date: date
 
 router = APIRouter()
 
@@ -162,6 +172,92 @@ async def list_my_tasks(
         "data": [TaskSummaryResponse.model_validate(t) for t in tasks],
         "meta": {"page": page, "limit": limit, "total": total},
     }
+
+
+@router.post("/tasks/carryover")
+async def carryover_tasks(
+    body: TaskCarryoverRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Carry over incomplete tasks by updating their due_date.
+
+    Only updates tasks that are NOT in 'done' status.
+    """
+    if not body.task_ids:
+        return {"data": []}
+
+    result = await db.execute(
+        select(Task)
+        .options(selectinload(Task.assignees).selectinload(TaskAssignee.user))
+        .where(
+            Task.id.in_(body.task_ids),
+            Task.status != TaskStatus.done,
+        )
+    )
+    tasks = result.scalars().unique().all()
+
+    for task in tasks:
+        task.due_date = body.new_due_date
+        task.updated_by = current_user.id
+
+    await db.commit()
+
+    return {
+        "data": [TaskResponse.model_validate(t) for t in tasks],
+    }
+
+
+@router.get("/tasks/summary-by-student")
+async def task_summary_by_student(
+    week_start: date = Query(..., description="Start of week (YYYY-MM-DD)"),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Return task completion stats grouped by student (assignee).
+
+    Counts tasks assigned to each user, grouped by status.
+    """
+    query = (
+        select(
+            TaskAssignee.user_id,
+            User.name,
+            Task.status,
+            func.count().label("cnt"),
+        )
+        .join(Task, TaskAssignee.task_id == Task.id)
+        .join(User, TaskAssignee.user_id == User.id)
+        .where(User.role == UserRole.student)
+        .group_by(TaskAssignee.user_id, User.name, Task.status)
+    )
+    result = await db.execute(query)
+    rows = result.all()
+
+    # Aggregate by user
+    by_user: dict[uuid.UUID, dict] = {}
+    for row in rows:
+        entry = by_user.setdefault(
+            row.user_id,
+            {
+                "user_id": str(row.user_id),
+                "name": row.name,
+                "done": 0,
+                "in_progress": 0,
+                "todo": 0,
+                "blocked": 0,
+            },
+        )
+        status_key = row.status.value if hasattr(row.status, "value") else row.status
+        if status_key == "done":
+            entry["done"] += row.cnt
+        elif status_key == "in_progress":
+            entry["in_progress"] += row.cnt
+        elif status_key == "todo":
+            entry["todo"] += row.cnt
+        elif status_key == "blocked":
+            entry["blocked"] += row.cnt
+
+    return {"data": list(by_user.values())}
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)

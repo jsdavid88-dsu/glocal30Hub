@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef, useId } from 'react'
 import { useRole } from '../contexts/RoleContext'
 import { api } from '../api/client'
 import MiniCalendar from '../components/MiniCalendar'
@@ -166,7 +166,7 @@ function CommentInput({
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const fileInputId = useId().replace(/:/g, '_') + '_file'
 
   useEffect(() => {
     if (autoFocus && inputRef.current) {
@@ -191,7 +191,8 @@ function CommentInput({
       setImageUrl(null)
     } finally {
       setUploading(false)
-      if (fileRef.current) fileRef.current.value = ''
+      const fileEl = document.getElementById(fileInputId) as HTMLInputElement | null
+      if (fileEl) fileEl.value = ''
     }
   }
 
@@ -269,12 +270,13 @@ function CommentInput({
         </div>
       )}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        {/* Image attach button */}
+        {/* Image attach button - label+input for reliable file picker */}
         <label
+          htmlFor={fileInputId}
           title="이미지 첨부"
           style={{
             width: 32, height: 32,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             border: '1px solid #e2e8f0', borderRadius: 8,
             background: '#f8fafc', cursor: uploading ? 'not-allowed' : 'pointer',
             color: '#94a3b8', flexShrink: 0,
@@ -290,7 +292,7 @@ function CommentInput({
             <polyline points="21 15 16 10 5 21"/>
           </svg>
           <input
-            ref={fileRef}
+            id={fileInputId}
             type="file"
             accept="image/*"
             style={{ display: 'none' }}

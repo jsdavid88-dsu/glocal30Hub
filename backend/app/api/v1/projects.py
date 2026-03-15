@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.project import Project, ProjectMember, ProjectMemberRole, ProjectStatus
+from app.models.task import Task, TaskStatus
 from app.models.user import User, UserRole
 from app.schemas.project import (
     ProjectCreate,
@@ -51,8 +52,47 @@ async def list_projects(
     result = await db.execute(query)
     projects = result.scalars().all()
 
+    # Gather member counts and task stats for returned projects
+    project_ids = [p.id for p in projects]
+    member_counts: dict = {}
+    task_stats: dict = {}
+
+    if project_ids:
+        # Member counts per project
+        mc_query = (
+            select(ProjectMember.project_id, func.count().label("cnt"))
+            .where(ProjectMember.project_id.in_(project_ids))
+            .group_by(ProjectMember.project_id)
+        )
+        mc_result = await db.execute(mc_query)
+        for row in mc_result:
+            member_counts[row.project_id] = row.cnt
+
+        # Task total and done counts per project
+        ts_query = (
+            select(
+                Task.project_id,
+                func.count().label("total"),
+                func.count().filter(Task.status == TaskStatus.done).label("done"),
+            )
+            .where(Task.project_id.in_(project_ids))
+            .group_by(Task.project_id)
+        )
+        ts_result = await db.execute(ts_query)
+        for row in ts_result:
+            task_stats[row.project_id] = {"total": row.total, "done": row.done}
+
+    data = []
+    for p in projects:
+        d = ProjectSummaryResponse.model_validate(p)
+        d.member_count = member_counts.get(p.id, 0)
+        stats = task_stats.get(p.id, {})
+        d.task_done = stats.get("done", 0)
+        d.task_total = stats.get("total", 0)
+        data.append(d)
+
     return {
-        "data": [ProjectSummaryResponse.model_validate(p) for p in projects],
+        "data": data,
         "meta": {"page": page, "limit": limit, "total": total},
     }
 
