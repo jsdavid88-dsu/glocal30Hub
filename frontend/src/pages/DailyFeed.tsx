@@ -149,49 +149,65 @@ function formatTimeAgo(dateStr: string): string {
   return d.toLocaleDateString('ko-KR')
 }
 
-function BlockComments({ blockId }: { blockId: string }) {
-  const [open, setOpen] = useState(false)
-  const [comments, setComments] = useState<any[]>([])
-  const [commentCount, setCommentCount] = useState(0)
-  const [newComment, setNewComment] = useState('')
+function CommentInput({
+  onSubmit,
+  placeholder = '댓글을 입력하세요...',
+  autoFocus = false,
+  onCancel,
+}: {
+  onSubmit: (content: string, imageUrl?: string) => Promise<void>
+  placeholder?: string
+  autoFocus?: boolean
+  onCancel?: () => void
+}) {
+  const [text, setText] = useState('')
+  const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
-  // Fetch comment count on mount (light fetch)
   useEffect(() => {
-    if (!blockId) return
-    ;(async () => {
-      try {
-        const data: any = await api.comments.list(blockId)
-        const items = Array.isArray(data) ? data : (data?.data || [])
-        setCommentCount(items.length)
-        setComments(items)
-      } catch {
-        // API not available
-      }
-    })()
-  }, [blockId])
+    if (autoFocus && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
+  }, [autoFocus])
 
-  const handleToggle = () => {
-    setOpen(!open)
-    if (!open && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 100)
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) return
+    setUploading(true)
+    // Show local preview immediately
+    const localUrl = URL.createObjectURL(file)
+    setImagePreview(localUrl)
+    try {
+      const res: any = await api.uploads.upload(file)
+      const url = res?.file_url || res?.url || ''
+      setImageUrl(url)
+    } catch {
+      setImagePreview(null)
+      setImageUrl(null)
+    } finally {
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ''
     }
   }
 
+  const removeImage = () => {
+    setImageUrl(null)
+    setImagePreview(null)
+  }
+
   const handleSubmit = async () => {
-    if (!newComment.trim() || submitting) return
+    if ((!text.trim() && !imageUrl) || submitting) return
     setSubmitting(true)
     try {
-      await api.comments.create(blockId, newComment.trim())
-      setNewComment('')
-      // Refresh comments
-      const data: any = await api.comments.list(blockId)
-      const items = Array.isArray(data) ? data : (data?.data || [])
-      setComments(items)
-      setCommentCount(items.length)
-    } catch {
-      // Error handling
+      await onSubmit(text.trim(), imageUrl || undefined)
+      setText('')
+      setImageUrl(null)
+      setImagePreview(null)
     } finally {
       setSubmitting(false)
     }
@@ -202,6 +218,294 @@ function BlockComments({ blockId }: { blockId: string }) {
       e.preventDefault()
       handleSubmit()
     }
+    if (e.key === 'Escape' && onCancel) {
+      onCancel()
+    }
+  }
+
+  const hasContent = text.trim() || imageUrl
+
+  return (
+    <div>
+      {/* Image preview */}
+      {imagePreview && (
+        <div style={{ marginBottom: 8, position: 'relative', display: 'inline-block' }}>
+          <img
+            src={imagePreview}
+            alt="첨부 이미지"
+            style={{
+              maxWidth: 160,
+              maxHeight: 120,
+              borderRadius: 8,
+              border: '1px solid #e2e8f0',
+              objectFit: 'cover' as const,
+              opacity: uploading ? 0.5 : 1,
+            }}
+          />
+          {!uploading && (
+            <button
+              onClick={removeImage}
+              style={{
+                position: 'absolute', top: -6, right: -6,
+                width: 20, height: 20, borderRadius: '50%',
+                background: '#ef4444', color: '#fff', border: 'none',
+                fontSize: 12, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                lineHeight: 1,
+              }}
+            >
+              x
+            </button>
+          )}
+          {uploading && (
+            <span style={{
+              position: 'absolute', bottom: 4, left: 4,
+              fontSize: 10, color: '#fff', background: 'rgba(0,0,0,0.5)',
+              padding: '1px 6px', borderRadius: 4,
+            }}>
+              업로드 중...
+            </span>
+          )}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {/* Image attach button */}
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          title="이미지 첨부"
+          style={{
+            width: 32, height: 32,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '1px solid #e2e8f0', borderRadius: 8,
+            background: '#f8fafc', cursor: 'pointer',
+            color: '#94a3b8', flexShrink: 0,
+            transition: 'all 0.15s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#4f46e5'; e.currentTarget.style.color = '#4f46e5' }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.color = '#94a3b8' }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={handleFileSelect}
+        />
+        <input
+          ref={inputRef}
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          style={{
+            flex: 1,
+            padding: '7px 12px',
+            border: '1px solid #e2e8f0',
+            borderRadius: 8,
+            fontSize: 12,
+            color: '#0f172a',
+            outline: 'none',
+            background: '#f8fafc',
+            transition: 'border-color 0.15s',
+          }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = '#4f46e5' }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = '#e2e8f0' }}
+        />
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            style={{
+              padding: '7px 10px',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 500,
+              background: '#fff',
+              color: '#64748b',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              whiteSpace: 'nowrap' as const,
+            }}
+          >
+            취소
+          </button>
+        )}
+        <button
+          onClick={handleSubmit}
+          disabled={!hasContent || submitting}
+          style={{
+            padding: '7px 14px',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            background: hasContent ? '#4f46e5' : '#e2e8f0',
+            color: hasContent ? '#fff' : '#94a3b8',
+            cursor: hasContent ? 'pointer' : 'default',
+            transition: 'all 0.15s',
+            whiteSpace: 'nowrap' as const,
+          }}
+        >
+          {submitting ? '...' : '등록'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function SingleComment({
+  comment,
+  isReply = false,
+  onReply,
+}: {
+  comment: any
+  isReply?: boolean
+  onReply?: (commentId: string) => void
+}) {
+  const avatarSize = isReply ? 20 : 24
+  const fontSize = isReply ? 11 : 12
+
+  return (
+    <div style={{
+      display: 'flex', gap: 8, alignItems: 'flex-start',
+      ...(isReply ? { marginLeft: 32, paddingLeft: 12, borderLeft: '2px solid #e2e8f0' } : {}),
+    }}>
+      <div style={{
+        width: avatarSize, height: avatarSize, borderRadius: '50%',
+        background: isReply ? '#f1f5f9' : '#e0e7ff',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, marginTop: 1,
+      }}>
+        <span style={{ fontSize: isReply ? 9 : 10, fontWeight: 600, color: isReply ? '#64748b' : '#4338ca' }}>
+          {(comment.author_name || '?').charAt(0)}
+        </span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize, fontWeight: 600, color: '#1e293b' }}>
+            {comment.author_name || '알 수 없음'}
+          </span>
+          <span style={{ fontSize: isReply ? 9 : 10, color: '#94a3b8' }}>
+            {comment.created_at ? formatTimeAgo(comment.created_at) : ''}
+          </span>
+        </div>
+        <p style={{ fontSize, color: '#475569', lineHeight: 1.6, margin: '2px 0 0' }}>
+          {comment.content}
+        </p>
+        {/* Comment image */}
+        {comment.image_url && (
+          <a href={comment.image_url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: 6 }}>
+            <img
+              src={comment.image_url}
+              alt="첨부 이미지"
+              style={{
+                maxWidth: 200,
+                maxHeight: 150,
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                objectFit: 'cover' as const,
+                cursor: 'pointer',
+              }}
+            />
+          </a>
+        )}
+        {/* Reply button (only on top-level comments) */}
+        {!isReply && onReply && (
+          <button
+            onClick={() => onReply(comment.id)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              marginTop: 4, padding: '2px 6px',
+              border: 'none', background: 'transparent',
+              fontSize: 11, color: '#94a3b8', cursor: 'pointer',
+              borderRadius: 4, transition: 'all 0.15s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#4f46e5'; e.currentTarget.style.background = '#f1f5f9' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'transparent' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 17 4 12 9 7"/>
+              <path d="M20 18v-2a4 4 0 00-4-4H4"/>
+            </svg>
+            답글
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function BlockComments({ blockId }: { blockId: string }) {
+  const [open, setOpen] = useState(false)
+  const [comments, setComments] = useState<any[]>([])
+  const [commentCount, setCommentCount] = useState(0)
+  const [replyTo, setReplyTo] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Count includes replies
+  const totalCount = useMemo(() => {
+    let count = comments.length
+    for (const c of comments) {
+      if (c.replies) count += c.replies.length
+    }
+    return count
+  }, [comments])
+
+  // Fetch comments on mount
+  useEffect(() => {
+    if (!blockId) return
+    ;(async () => {
+      try {
+        const data: any = await api.comments.list(blockId)
+        const items = Array.isArray(data) ? data : (data?.data || [])
+        setComments(items)
+        let count = items.length
+        for (const c of items) {
+          if (c.replies) count += c.replies.length
+        }
+        setCommentCount(count)
+      } catch {
+        // API not available
+      }
+    })()
+  }, [blockId])
+
+  const refreshComments = async () => {
+    try {
+      const data: any = await api.comments.list(blockId)
+      const items = Array.isArray(data) ? data : (data?.data || [])
+      setComments(items)
+      let count = items.length
+      for (const c of items) {
+        if (c.replies) count += c.replies.length
+      }
+      setCommentCount(count)
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleToggle = () => {
+    setOpen(!open)
+  }
+
+  const handleSubmitComment = async (content: string, imageUrl?: string) => {
+    await api.comments.create(blockId, { content, image_url: imageUrl })
+    await refreshComments()
+  }
+
+  const handleSubmitReply = async (parentId: string, content: string, imageUrl?: string) => {
+    await api.comments.create(blockId, { content, parent_id: parentId, image_url: imageUrl })
+    setReplyTo(null)
+    await refreshComments()
   }
 
   return (
@@ -218,8 +522,8 @@ function BlockComments({ blockId }: { blockId: string }) {
           background: 'transparent',
           cursor: 'pointer',
           fontSize: 11,
-          color: commentCount > 0 ? '#4f46e5' : '#94a3b8',
-          fontWeight: commentCount > 0 ? 600 : 400,
+          color: totalCount > 0 ? '#4f46e5' : '#94a3b8',
+          fontWeight: totalCount > 0 ? 600 : 400,
           borderRadius: 6,
           transition: 'all 0.15s',
         }}
@@ -229,95 +533,58 @@ function BlockComments({ blockId }: { blockId: string }) {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
         </svg>
-        {commentCount > 0 ? `${commentCount}` : '댓글'}
+        {totalCount > 0 ? `${totalCount}` : '댓글'}
       </button>
 
       {/* Expanded comment section */}
       {open && (
         <div style={{
           marginTop: 8,
-          padding: '12px 14px',
+          padding: '14px 16px',
           background: '#ffffff',
           border: '1px solid #e2e8f0',
           borderRadius: 10,
         }}>
           {/* Comment list */}
           {comments.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10, marginBottom: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 12, marginBottom: 14 }}>
               {comments.map((c: any) => (
-                <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                  <div style={{
-                    width: 24, height: 24, borderRadius: '50%',
-                    background: '#e0e7ff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0, marginTop: 1,
-                  }}>
-                    <span style={{ fontSize: 10, fontWeight: 600, color: '#4338ca' }}>
-                      {(c.author_name || '?').charAt(0)}
-                    </span>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1e293b' }}>
-                        {c.author_name || '알 수 없음'}
-                      </span>
-                      <span style={{ fontSize: 10, color: '#94a3b8' }}>
-                        {c.created_at ? formatTimeAgo(c.created_at) : ''}
-                      </span>
+                <div key={c.id}>
+                  <SingleComment
+                    comment={c}
+                    onReply={(id) => setReplyTo(replyTo === id ? null : id)}
+                  />
+                  {/* Nested replies */}
+                  {c.replies && c.replies.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginTop: 8 }}>
+                      {c.replies.map((r: any) => (
+                        <SingleComment key={r.id} comment={r} isReply />
+                      ))}
                     </div>
-                    <p style={{ fontSize: 12, color: '#475569', lineHeight: 1.6, margin: '2px 0 0' }}>
-                      {c.content}
-                    </p>
-                  </div>
+                  )}
+                  {/* Inline reply input */}
+                  {replyTo === c.id && (
+                    <div style={{ marginLeft: 32, marginTop: 8, paddingLeft: 12, borderLeft: '2px solid #e0e7ff' }}>
+                      <CommentInput
+                        placeholder={`${c.author_name || ''}님에게 답글...`}
+                        autoFocus
+                        onSubmit={(content, imageUrl) => handleSubmitReply(c.id, content, imageUrl)}
+                        onCancel={() => setReplyTo(null)}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           ) : (
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 10px' }}>아직 댓글이 없습니다.</p>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 12px' }}>아직 댓글이 없습니다.</p>
           )}
 
-          {/* New comment input */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              ref={inputRef}
-              type="text"
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="댓글을 입력하세요..."
-              style={{
-                flex: 1,
-                padding: '7px 12px',
-                border: '1px solid #e2e8f0',
-                borderRadius: 8,
-                fontSize: 12,
-                color: '#0f172a',
-                outline: 'none',
-                background: '#f8fafc',
-                transition: 'border-color 0.15s',
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#4f46e5' }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = '#e2e8f0' }}
-            />
-            <button
-              onClick={handleSubmit}
-              disabled={!newComment.trim() || submitting}
-              style={{
-                padding: '7px 14px',
-                border: 'none',
-                borderRadius: 8,
-                fontSize: 12,
-                fontWeight: 600,
-                background: newComment.trim() ? '#4f46e5' : '#e2e8f0',
-                color: newComment.trim() ? '#fff' : '#94a3b8',
-                cursor: newComment.trim() ? 'pointer' : 'default',
-                transition: 'all 0.15s',
-                whiteSpace: 'nowrap' as const,
-              }}
-            >
-              {submitting ? '...' : '등록'}
-            </button>
-          </div>
+          {/* New top-level comment input */}
+          <CommentInput
+            onSubmit={handleSubmitComment}
+            placeholder="댓글을 입력하세요..."
+          />
         </div>
       )}
     </div>

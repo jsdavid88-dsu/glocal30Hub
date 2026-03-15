@@ -72,8 +72,8 @@ export const api = {
   // Comments
   comments: {
     list: (blockId: string) => request(`/daily-blocks/${blockId}/comments`),
-    create: (blockId: string, content: string) =>
-      request(`/daily-blocks/${blockId}/comments`, { method: 'POST', body: JSON.stringify({ content }) }),
+    create: (blockId: string, data: { content: string; parent_id?: string; image_url?: string }) =>
+      request(`/daily-blocks/${blockId}/comments`, { method: 'POST', body: JSON.stringify(data) }),
   },
   // Uploads
   uploads: {

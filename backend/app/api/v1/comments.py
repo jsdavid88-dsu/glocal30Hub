@@ -14,14 +14,21 @@ from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
 router = APIRouter()
 
 
-def _to_response(comment: Comment) -> CommentResponse:
+def _to_response(comment: Comment, include_replies: bool = True) -> CommentResponse:
     """Convert Comment ORM object to CommentResponse, extracting author_name."""
+    replies = []
+    if include_replies and hasattr(comment, "replies") and comment.replies:
+        replies = [_to_response(r, include_replies=False) for r in comment.replies]
+
     return CommentResponse(
         id=comment.id,
         daily_block_id=comment.daily_block_id,
         author_id=comment.author_id,
         author_name=comment.author.name,
         content=comment.content,
+        parent_id=comment.parent_id,
+        image_url=comment.image_url,
+        replies=replies,
         created_at=comment.created_at,
         updated_at=comment.updated_at,
     )
@@ -33,11 +40,14 @@ async def list_comments(
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
-    """List comments for a daily block."""
+    """List top-level comments for a daily block, with nested replies."""
     query = (
         select(Comment)
-        .options(selectinload(Comment.author))
-        .where(Comment.daily_block_id == block_id)
+        .options(
+            selectinload(Comment.author),
+            selectinload(Comment.replies).selectinload(Comment.author),
+        )
+        .where(Comment.daily_block_id == block_id, Comment.parent_id.is_(None))
         .order_by(Comment.created_at)
     )
     result = await db.execute(query)
@@ -53,19 +63,46 @@ async def create_comment(
     current_user: User = Depends(get_current_user),
 ):
     """Add a comment to a daily block. Any authenticated user can comment."""
+    # Validate parent_id if provided
+    if body.parent_id is not None:
+        parent_result = await db.execute(
+            select(Comment).where(Comment.id == body.parent_id)
+        )
+        parent = parent_result.scalar_one_or_none()
+        if parent is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Parent comment not found",
+            )
+        if parent.parent_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot reply to a reply. Only one level of nesting is allowed.",
+            )
+        if parent.daily_block_id != block_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Parent comment does not belong to this block.",
+            )
+
     comment = Comment(
         daily_block_id=block_id,
         author_id=current_user.id,
         content=body.content,
+        parent_id=body.parent_id,
+        image_url=body.image_url,
     )
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
 
-    # Re-fetch with author relationship
+    # Re-fetch with author relationship and replies
     result = await db.execute(
         select(Comment)
-        .options(selectinload(Comment.author))
+        .options(
+            selectinload(Comment.author),
+            selectinload(Comment.replies).selectinload(Comment.author),
+        )
         .where(Comment.id == comment.id)
     )
     comment = result.scalar_one()
@@ -82,7 +119,10 @@ async def update_comment(
     """Edit a comment. Only the author can edit their own comment."""
     result = await db.execute(
         select(Comment)
-        .options(selectinload(Comment.author))
+        .options(
+            selectinload(Comment.author),
+            selectinload(Comment.replies).selectinload(Comment.author),
+        )
         .where(Comment.id == comment_id)
     )
     comment = result.scalar_one_or_none()
@@ -102,7 +142,10 @@ async def update_comment(
     # Re-fetch with author
     result = await db.execute(
         select(Comment)
-        .options(selectinload(Comment.author))
+        .options(
+            selectinload(Comment.author),
+            selectinload(Comment.replies).selectinload(Comment.author),
+        )
         .where(Comment.id == comment.id)
     )
     comment = result.scalar_one()
