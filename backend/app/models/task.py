@@ -30,6 +30,7 @@ class Task(UUIDMixin, TimestampMixin, Base):
         Index("ix_tasks_project_id_status", "project_id", "status"),
         Index("ix_tasks_due_date", "due_date"),
         Index("ix_tasks_priority", "priority"),
+        Index("ix_tasks_parent_id", "parent_id"),
     )
 
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -49,6 +50,20 @@ class Task(UUIDMixin, TimestampMixin, Base):
     )
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Self-referential hierarchy
+    children: Mapped[list["Task"]] = relationship(
+        "Task", back_populates="parent", cascade="all, delete-orphan",
+        foreign_keys="Task.parent_id",
+    )
+    parent: Mapped["Task | None"] = relationship(
+        "Task", back_populates="children", remote_side="Task.id",
+        foreign_keys="Task.parent_id",
     )
 
     assignees: Mapped[list["TaskAssignee"]] = relationship(back_populates="task")

@@ -103,10 +103,36 @@ export const api = {
       request('/weekly-notes/', { method: 'POST', body: JSON.stringify({ week_start: weekStart, content }) }),
     getSummary: (weekStart: string) => request(`/weekly-notes/summary?week_start=${weekStart}`),
   },
-  // Events (TODO: router not yet mounted in backend — calls will 404 until Phase 3)
+  // Events
   events: {
     list: (params?: Record<string, string>) => request(`/events/?${new URLSearchParams(params)}`),
     get: (id: string) => request(`/events/${id}`),
     create: (data: any) => request('/events/', { method: 'POST', body: JSON.stringify(data) }),
+  },
+  // Attendance
+  attendance: {
+    today: () => request('/attendance/today'),
+    checkIn: (type = 'daily') =>
+      request('/attendance/check-in', { method: 'POST', body: JSON.stringify({ type }) }),
+    checkOut: () =>
+      request('/attendance/check-out', { method: 'POST' }),
+    history: (params?: Record<string, string>) =>
+      request(`/attendance/history?${new URLSearchParams(params)}`),
+    stats: (params?: Record<string, string>) =>
+      request(`/attendance/stats?${new URLSearchParams(params)}`),
+    students: (params?: Record<string, string>) =>
+      request(`/attendance/students?${new URLSearchParams(params)}`),
+  },
+  // Notifications
+  notifications: {
+    list: (params?: Record<string, string>) =>
+      request(`/notifications/?${new URLSearchParams(params)}`),
+    unreadCount: () => request('/notifications/unread-count'),
+    markRead: (id: string) =>
+      request(`/notifications/${id}/read`, { method: 'PATCH' }),
+    markAllRead: () =>
+      request('/notifications/read-all', { method: 'POST' }),
+    delete: (id: string) =>
+      request(`/notifications/${id}`, { method: 'DELETE' }),
   },
 };

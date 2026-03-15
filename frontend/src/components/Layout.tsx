@@ -1,7 +1,126 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useRole, type Role } from '../contexts/RoleContext'
 import { useAuth } from '../contexts/AuthContext'
+
+interface NotificationItem {
+  id: string
+  notification_type: string
+  title: string
+  body: string | null
+  target_type: string | null
+  target_id: string | null
+  is_read: boolean
+  created_at: string
+}
+
+const NOTIFICATION_TYPE_ICONS: Record<string, string> = {
+  task_assigned: '\u{1F4CB}',
+  task_updated: '\u{1F504}',
+  daily_comment: '\u{1F4AC}',
+  daily_issue: '\u{26A0}\u{FE0F}',
+  attendance_missing: '\u{23F0}',
+  event_reminder: '\u{1F4C5}',
+  report_published: '\u{1F4CA}',
+  sota_assigned: '\u{1F4D6}',
+}
+
+function timeAgo(dateStr: string): string {
+  const now = Date.now()
+  const then = new Date(dateStr).getTime()
+  const diff = Math.max(0, now - then)
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return '방금 전'
+  if (minutes < 60) return `${minutes}분 전`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}시간 전`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}일 전`
+  return new Date(dateStr).toLocaleDateString('ko-KR')
+}
+
+function useNotifications() {
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [loading, setLoading] = useState(false)
+
+  const getHeaders = useCallback(() => {
+    const token = localStorage.getItem('token')
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }
+  }, [])
+
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/notifications/unread-count', { headers: getHeaders() })
+      if (res.ok) {
+        const data = await res.json()
+        setUnreadCount(data.unread_count)
+      }
+    } catch {
+      // silently ignore
+    }
+  }, [getHeaders])
+
+  const fetchNotifications = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/v1/notifications/?limit=20', { headers: getHeaders() })
+      if (res.ok) {
+        const data = await res.json()
+        setNotifications(data.data)
+        setUnreadCount(data.unread_count)
+      }
+    } catch {
+      // silently ignore
+    } finally {
+      setLoading(false)
+    }
+  }, [getHeaders])
+
+  const markAsRead = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/v1/notifications/${id}/read`, {
+        method: 'PATCH',
+        headers: getHeaders(),
+      })
+      if (res.ok) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+        )
+        setUnreadCount((prev) => Math.max(0, prev - 1))
+      }
+    } catch {
+      // silently ignore
+    }
+  }, [getHeaders])
+
+  const markAllAsRead = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/notifications/read-all', {
+        method: 'POST',
+        headers: getHeaders(),
+      })
+      if (res.ok) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
+        setUnreadCount(0)
+      }
+    } catch {
+      // silently ignore
+    }
+  }, [getHeaders])
+
+  // Poll unread count every 30 seconds
+  useEffect(() => {
+    fetchUnreadCount()
+    const interval = setInterval(fetchUnreadCount, 30000)
+    return () => clearInterval(interval)
+  }, [fetchUnreadCount])
+
+  return { notifications, unreadCount, loading, fetchNotifications, markAsRead, markAllAsRead }
+}
 
 const allNavItems = [
   {
@@ -189,10 +308,7 @@ export default function Layout() {
               })}
             </div>
 
-            <button style={{ position: 'relative', padding: 8, borderRadius: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#475569' }}>
-              <BellIcon />
-              <span style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, background: '#4f46e5', borderRadius: '50%' }} />
-            </button>
+            <NotificationBell />
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingLeft: 16, borderLeft: '1px solid #e2e8f0' }}>
               <div style={{ position: 'relative' }}>
                 <div style={{ width: 32, height: 32, borderRadius: '50%', background: rc.gradient, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -229,6 +345,148 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+    </div>
+  )
+}
+
+function NotificationBell() {
+  const { notifications, unreadCount, loading, fetchNotifications, markAsRead, markAllAsRead } = useNotifications()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const handleToggle = () => {
+    const next = !open
+    setOpen(next)
+    if (next) fetchNotifications()
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={handleToggle}
+        style={{ position: 'relative', padding: 8, borderRadius: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#475569' }}
+      >
+        <BellIcon />
+        {unreadCount > 0 && (
+          <span style={{
+            position: 'absolute', top: 4, right: 4,
+            minWidth: 16, height: 16, borderRadius: 99,
+            background: '#ef4444', color: '#fff',
+            fontSize: 10, fontWeight: 700, lineHeight: '16px',
+            textAlign: 'center' as const, padding: '0 4px',
+          }}>
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, marginTop: 4,
+          width: 360, maxHeight: 400,
+          background: '#fff', borderRadius: 12,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08)',
+          border: '1px solid #e2e8f0',
+          display: 'flex', flexDirection: 'column' as const,
+          zIndex: 100,
+          overflow: 'hidden',
+        }}>
+          {/* Header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '12px 16px', borderBottom: '1px solid #f1f5f9',
+          }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
+              알림 {unreadCount > 0 && <span style={{ color: '#4f46e5' }}>({unreadCount})</span>}
+            </span>
+          </div>
+
+          {/* List */}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {loading && notifications.length === 0 ? (
+              <div style={{ padding: 32, textAlign: 'center' as const, color: '#94a3b8', fontSize: 13 }}>
+                로딩 중...
+              </div>
+            ) : notifications.length === 0 ? (
+              <div style={{ padding: 32, textAlign: 'center' as const, color: '#94a3b8', fontSize: 13 }}>
+                알림이 없습니다
+              </div>
+            ) : (
+              notifications.map((n) => (
+                <div
+                  key={n.id}
+                  onClick={() => { if (!n.is_read) markAsRead(n.id) }}
+                  style={{
+                    display: 'flex', gap: 10, padding: '10px 16px',
+                    background: n.is_read ? '#fff' : '#eff6ff',
+                    cursor: n.is_read ? 'default' : 'pointer',
+                    borderBottom: '1px solid #f8fafc',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => { if (!n.is_read) (e.currentTarget as HTMLDivElement).style.background = '#dbeafe' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = n.is_read ? '#fff' : '#eff6ff' }}
+                >
+                  {/* Type icon */}
+                  <span style={{ fontSize: 18, flexShrink: 0, lineHeight: '24px' }}>
+                    {NOTIFICATION_TYPE_ICONS[n.notification_type] || '\u{1F514}'}
+                  </span>
+                  {/* Content */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: n.is_read ? 400 : 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                        {n.title}
+                      </span>
+                      {!n.is_read && (
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5', flexShrink: 0 }} />
+                      )}
+                    </div>
+                    {n.body && (
+                      <p style={{
+                        fontSize: 12, color: '#64748b', marginTop: 2, lineHeight: 1.4,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                      }}>
+                        {n.body}
+                      </p>
+                    )}
+                    <span style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, display: 'block' }}>
+                      {timeAgo(n.created_at)}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Footer */}
+          {notifications.length > 0 && unreadCount > 0 && (
+            <div style={{ borderTop: '1px solid #f1f5f9', padding: '8px 16px' }}>
+              <button
+                onClick={markAllAsRead}
+                style={{
+                  width: '100%', padding: '6px 0',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 13, fontWeight: 500, color: '#4f46e5',
+                  borderRadius: 6,
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#f8fafc' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none' }}
+              >
+                모두 읽음
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

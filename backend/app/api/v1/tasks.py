@@ -3,7 +3,7 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,6 +21,8 @@ from app.schemas.task import (
     TaskResponse,
     TaskStatusUpdate,
     TaskSummaryResponse,
+    TaskTreeNode,
+    TaskTreeResponse,
     TaskUpdate,
 )
 
@@ -32,7 +34,18 @@ class TaskCarryoverRequest(BaseModel):
     task_ids: list[uuid.UUID]
     new_due_date: date
 
+
+class TaskGroupRequest(BaseModel):
+    child_task_ids: list[uuid.UUID] = Field(..., min_length=1)
+
+
+class TaskUngroupRequest(BaseModel):
+    child_task_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
 router = APIRouter()
+
+MAX_HIERARCHY_DEPTH = 3
 
 
 # ── Helper ───────────────────────────────────────────────────────────────────
@@ -43,11 +56,14 @@ async def _get_task_or_404(
     task_id: uuid.UUID,
     *,
     load_assignees: bool = False,
+    load_children: bool = False,
 ) -> Task:
     """Fetch a task by ID; raise 404 if not found."""
     query = select(Task).where(Task.id == task_id)
     if load_assignees:
         query = query.options(selectinload(Task.assignees).selectinload(TaskAssignee.user))
+    if load_children:
+        query = query.options(selectinload(Task.children))
     result = await db.execute(query)
     task = result.scalar_one_or_none()
     if task is None:
@@ -60,6 +76,96 @@ async def _check_project_exists(db: AsyncSession, project_id: uuid.UUID) -> None
     result = await db.execute(select(Project).where(Project.id == project_id))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+
+async def _get_ancestor_ids(db: AsyncSession, task_id: uuid.UUID) -> set[uuid.UUID]:
+    """Walk up the parent chain and return all ancestor IDs (including self)."""
+    ancestors: set[uuid.UUID] = set()
+    current_id: uuid.UUID | None = task_id
+    while current_id is not None:
+        if current_id in ancestors:
+            break  # circular reference safety
+        ancestors.add(current_id)
+        result = await db.execute(select(Task.parent_id).where(Task.id == current_id))
+        row = result.one_or_none()
+        current_id = row[0] if row else None
+    return ancestors
+
+
+async def _get_depth(db: AsyncSession, task_id: uuid.UUID) -> int:
+    """Return the depth of a task (0 = root)."""
+    depth = 0
+    current_id: uuid.UUID | None = task_id
+    while True:
+        result = await db.execute(select(Task.parent_id).where(Task.id == current_id))
+        row = result.one_or_none()
+        if row is None or row[0] is None:
+            break
+        depth += 1
+        current_id = row[0]
+    return depth
+
+
+async def _get_max_subtree_depth(db: AsyncSession, task_id: uuid.UUID) -> int:
+    """Return the max depth of descendants below this task (0 = no children)."""
+    result = await db.execute(
+        select(Task.id).where(Task.parent_id == task_id)
+    )
+    child_ids = [row[0] for row in result.all()]
+    if not child_ids:
+        return 0
+    max_child_depth = 0
+    for child_id in child_ids:
+        child_depth = 1 + await _get_max_subtree_depth(db, child_id)
+        max_child_depth = max(max_child_depth, child_depth)
+    return max_child_depth
+
+
+async def _validate_parent(
+    db: AsyncSession,
+    parent_id: uuid.UUID,
+    project_id: uuid.UUID,
+    task_id: uuid.UUID | None = None,
+) -> None:
+    """Validate parent task exists, belongs to same project, and depth is within limit."""
+    parent = await _get_task_or_404(db, parent_id)
+    if parent.project_id != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Parent task must belong to the same project",
+        )
+
+    # Check circular reference (only relevant when reparenting an existing task)
+    if task_id is not None:
+        if parent_id == task_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A task cannot be its own parent",
+            )
+        ancestor_ids = await _get_ancestor_ids(db, parent_id)
+        if task_id in ancestor_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Circular reference detected: task is an ancestor of the proposed parent",
+            )
+
+    # Check depth limit
+    parent_depth = await _get_depth(db, parent_id)
+    # The child will be at parent_depth + 1
+    child_depth = parent_depth + 1
+    if task_id is not None:
+        # When reparenting, also check the subtree below the task
+        subtree_depth = await _get_max_subtree_depth(db, task_id)
+        if child_depth + subtree_depth >= MAX_HIERARCHY_DEPTH:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Maximum hierarchy depth of {MAX_HIERARCHY_DEPTH} levels exceeded",
+            )
+    elif child_depth >= MAX_HIERARCHY_DEPTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Maximum hierarchy depth of {MAX_HIERARCHY_DEPTH} levels exceeded",
+        )
 
 
 # ── Project-scoped task endpoints ────────────────────────────────────────────
@@ -75,6 +181,8 @@ async def list_project_tasks(
     status_filter: TaskStatus | None = Query(None, alias="status"),
     priority_filter: TaskPriority | None = Query(None, alias="priority"),
     assignee_id: uuid.UUID | None = Query(None),
+    parent_id: uuid.UUID | None = Query(None, alias="parent_id"),
+    top_level: bool | None = Query(None, description="If true, only return tasks with no parent"),
     q: str | None = None,
 ):
     """List tasks for a project with filtering and pagination."""
@@ -92,6 +200,10 @@ async def list_project_tasks(
                 select(TaskAssignee.task_id).where(TaskAssignee.user_id == assignee_id)
             )
         )
+    if top_level is True:
+        query = query.where(Task.parent_id.is_(None))
+    elif parent_id is not None:
+        query = query.where(Task.parent_id == parent_id)
     if q:
         query = query.where(Task.title.ilike(f"%{q}%") | Task.description.ilike(f"%{q}%"))
 
@@ -111,6 +223,48 @@ async def list_project_tasks(
     }
 
 
+@router.get("/projects/{project_id}/tasks/tree", response_model=TaskTreeResponse)
+async def get_project_task_tree(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Return tasks in a tree structure (top-level tasks with nested children)."""
+    await _check_project_exists(db, project_id)
+
+    # Fetch all tasks for the project
+    result = await db.execute(
+        select(Task).where(Task.project_id == project_id).order_by(Task.created_at.asc())
+    )
+    all_tasks = result.scalars().all()
+
+    # Build tree in memory
+    task_map: dict[uuid.UUID, dict] = {}
+    for t in all_tasks:
+        task_map[t.id] = {
+            "id": t.id,
+            "project_id": t.project_id,
+            "title": t.title,
+            "description": t.description,
+            "status": t.status,
+            "priority": t.priority,
+            "due_date": t.due_date,
+            "parent_id": t.parent_id,
+            "created_at": t.created_at,
+            "children": [],
+        }
+
+    roots: list[dict] = []
+    for t in all_tasks:
+        node = task_map[t.id]
+        if t.parent_id is not None and t.parent_id in task_map:
+            task_map[t.parent_id]["children"].append(node)
+        else:
+            roots.append(node)
+
+    return {"data": [TaskTreeNode.model_validate(r) for r in roots]}
+
+
 @router.post("/projects/{project_id}/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(
     project_id: uuid.UUID,
@@ -121,20 +275,25 @@ async def create_task(
     """Create a new task in a project."""
     await _check_project_exists(db, project_id)
 
+    # Validate parent_id if provided
+    if body.parent_id is not None:
+        await _validate_parent(db, body.parent_id, project_id)
+
     task = Task(
         project_id=project_id,
         title=body.title,
         description=body.description,
         priority=body.priority,
         due_date=body.due_date,
+        parent_id=body.parent_id,
         created_by=current_user.id,
         updated_by=current_user.id,
     )
     db.add(task)
     await db.commit()
 
-    # Re-fetch with assignees loaded
-    task = await _get_task_or_404(db, task.id, load_assignees=True)
+    # Re-fetch with assignees and children loaded
+    task = await _get_task_or_404(db, task.id, load_assignees=True, load_children=True)
     return task
 
 
@@ -189,7 +348,10 @@ async def carryover_tasks(
 
     result = await db.execute(
         select(Task)
-        .options(selectinload(Task.assignees).selectinload(TaskAssignee.user))
+        .options(
+            selectinload(Task.assignees).selectinload(TaskAssignee.user),
+            selectinload(Task.children),
+        )
         .where(
             Task.id.in_(body.task_ids),
             Task.status != TaskStatus.done,
@@ -266,8 +428,8 @@ async def get_task(
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
-    """Get task detail with assignees."""
-    task = await _get_task_or_404(db, task_id, load_assignees=True)
+    """Get task detail with assignees and children."""
+    task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
     return task
 
 
@@ -278,18 +440,23 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Update a task's fields."""
+    """Update a task's fields (including reparenting via parent_id)."""
     task = await _get_task_or_404(db, task_id)
 
     update_data = body.model_dump(exclude_unset=True)
+
+    # Validate parent_id if being changed
+    if "parent_id" in update_data and update_data["parent_id"] is not None:
+        await _validate_parent(db, update_data["parent_id"], task.project_id, task_id=task_id)
+
     for field, value in update_data.items():
         setattr(task, field, value)
     task.updated_by = current_user.id
 
     await db.commit()
 
-    # Re-fetch with assignees
-    task = await _get_task_or_404(db, task_id, load_assignees=True)
+    # Re-fetch with assignees and children
+    task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
     return task
 
 
@@ -308,8 +475,137 @@ async def update_task_status(
 
     await db.commit()
 
-    # Re-fetch with assignees
-    task = await _get_task_or_404(db, task_id, load_assignees=True)
+    # Re-fetch with assignees and children
+    task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
+    return task
+
+
+# ── Task hierarchy endpoints ────────────────────────────────────────────────
+
+
+@router.post("/tasks/{task_id}/group", response_model=TaskResponse)
+async def group_tasks(
+    task_id: uuid.UUID,
+    body: TaskGroupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Group tasks under a parent. Sets parent_id of all specified child tasks to task_id.
+
+    Validates:
+    - All tasks belong to the same project
+    - No circular references
+    - Max depth limit of 3 levels
+    """
+    parent_task = await _get_task_or_404(db, task_id)
+
+    # Cannot group a task under itself
+    if task_id in body.child_task_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A task cannot be grouped under itself",
+        )
+
+    # Get the depth of the parent
+    parent_depth = await _get_depth(db, task_id)
+
+    # Get ancestor IDs of the parent to detect circular references
+    parent_ancestors = await _get_ancestor_ids(db, task_id)
+
+    # Fetch all child tasks
+    result = await db.execute(
+        select(Task).where(Task.id.in_(body.child_task_ids))
+    )
+    child_tasks = result.scalars().all()
+
+    if len(child_tasks) != len(body.child_task_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more child tasks not found",
+        )
+
+    for child in child_tasks:
+        # Same project check
+        if child.project_id != parent_task.project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Task {child.id} belongs to a different project",
+            )
+
+        # Circular reference check
+        if child.id in parent_ancestors:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Circular reference: task {child.id} is an ancestor of the parent",
+            )
+
+        # Depth check: child will be at parent_depth + 1, plus its own subtree
+        subtree_depth = await _get_max_subtree_depth(db, child.id)
+        if parent_depth + 1 + subtree_depth >= MAX_HIERARCHY_DEPTH:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Grouping task {child.id} would exceed max depth of {MAX_HIERARCHY_DEPTH} levels",
+            )
+
+    # All validations passed — apply
+    for child in child_tasks:
+        child.parent_id = task_id
+        child.updated_by = current_user.id
+
+    parent_task.updated_by = current_user.id
+    await db.commit()
+
+    # Re-fetch parent with all relationships
+    task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
+    return task
+
+
+@router.post("/tasks/{task_id}/ungroup", response_model=TaskResponse)
+async def ungroup_tasks(
+    task_id: uuid.UUID,
+    body: TaskUngroupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Ungroup children from a parent task. Sets parent_id to NULL.
+
+    If child_task_ids is empty, ungroups all children.
+    """
+    parent_task = await _get_task_or_404(db, task_id)
+
+    if body.child_task_ids:
+        # Ungroup specific children
+        result = await db.execute(
+            select(Task).where(
+                Task.id.in_(body.child_task_ids),
+                Task.parent_id == task_id,
+            )
+        )
+        children = result.scalars().all()
+
+        found_ids = {c.id for c in children}
+        missing = set(body.child_task_ids) - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tasks {[str(m) for m in missing]} are not children of this task",
+            )
+    else:
+        # Ungroup all children
+        result = await db.execute(
+            select(Task).where(Task.parent_id == task_id)
+        )
+        children = result.scalars().all()
+
+    for child in children:
+        child.parent_id = None
+        child.updated_by = current_user.id
+
+    parent_task.updated_by = current_user.id
+    await db.commit()
+
+    # Re-fetch parent with all relationships
+    task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
     return task
 
 
