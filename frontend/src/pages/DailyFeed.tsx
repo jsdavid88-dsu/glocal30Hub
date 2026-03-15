@@ -270,19 +270,18 @@ function CommentInput({
       )}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         {/* Image attach button */}
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={uploading}
+        <label
           title="이미지 첨부"
           style={{
             width: 32, height: 32,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             border: '1px solid #e2e8f0', borderRadius: 8,
-            background: '#f8fafc', cursor: 'pointer',
+            background: '#f8fafc', cursor: uploading ? 'not-allowed' : 'pointer',
             color: '#94a3b8', flexShrink: 0,
             transition: 'all 0.15s',
+            opacity: uploading ? 0.5 : 1,
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#4f46e5'; e.currentTarget.style.color = '#4f46e5' }}
+          onMouseEnter={(e) => { if (!uploading) { e.currentTarget.style.borderColor = '#4f46e5'; e.currentTarget.style.color = '#4f46e5' } }}
           onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.color = '#94a3b8' }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -290,14 +289,15 @@ function CommentInput({
             <circle cx="8.5" cy="8.5" r="1.5"/>
             <polyline points="21 15 16 10 5 21"/>
           </svg>
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          style={{ display: 'none' }}
-          onChange={handleFileSelect}
-        />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleFileSelect}
+            disabled={uploading}
+          />
+        </label>
         <input
           ref={inputRef}
           type="text"
