@@ -290,10 +290,12 @@ async def create_task(
         updated_by=current_user.id,
     )
     db.add(task)
+    await db.flush()
+    task_id = task.id  # capture before commit expires the object
     await db.commit()
 
     # Re-fetch with assignees and children loaded
-    task = await _get_task_or_404(db, task.id, load_assignees=True, load_children=True)
+    task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
     return task
 
 
