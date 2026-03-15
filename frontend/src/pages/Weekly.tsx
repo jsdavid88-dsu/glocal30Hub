@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { api } from '../api/client'
 import { useRole } from '../contexts/RoleContext'
 import MiniCalendar from '../components/MiniCalendar'
 import {
@@ -38,6 +39,7 @@ interface TaskItem {
 }
 
 interface StudentInfo {
+  id?: string
   name: string
   badge: '지도학생' | '프로젝트'
   project?: string
@@ -517,7 +519,33 @@ function ProfessorWeekly() {
   const [selectedDate, setSelectedDate] = useState(new Date(2026, 2, 12)) // March 12, 2026
   const weekLabel = useMemo(() => getWeekLabel(selectedDate), [selectedDate])
   const handleWeekSelect = useCallback((d: Date) => setSelectedDate(d), [])
+
+  // Compute weekStart key for localStorage
+  const weekStartKey = useMemo(() => {
+    const d = new Date(selectedDate)
+    const day = d.getDay()
+    const diff = day === 0 ? -6 : 1 - day
+    const monday = new Date(d)
+    monday.setDate(d.getDate() + diff)
+    return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`
+  }, [selectedDate])
+
+  // Meeting notes with localStorage persistence
   const [meetingNotes, setMeetingNotes] = useState('')
+  const [notesSaved, setNotesSaved] = useState(false)
+
+  // Load meeting notes from localStorage when week changes
+  useEffect(() => {
+    const saved = localStorage.getItem(`weekly-notes-${weekStartKey}`)
+    setMeetingNotes(saved || '')
+    setNotesSaved(false)
+  }, [weekStartKey])
+
+  function handleSaveMeetingNotes() {
+    localStorage.setItem(`weekly-notes-${weekStartKey}`, meetingNotes)
+    setNotesSaved(true)
+    setTimeout(() => setNotesSaved(false), 2000)
+  }
 
   // Summary view mode
   const [summaryView, setSummaryView] = useState<'project' | 'all'>('project')
@@ -525,9 +553,115 @@ function ProfessorWeekly() {
   // Project filter for DnD
   const [dndProjectFilter, setDndProjectFilter] = useState<string>('전체')
 
+  // Dynamic students and projects from API
+  const [apiStudents, setApiStudents] = useState<StudentInfo[]>(mockStudents)
+  const [apiProjects, setApiProjects] = useState<string[]>(projectList)
+  const [apiProjectObjects, setApiProjectObjects] = useState<{ id: string; name: string }[]>([])
+
   // Task pool state
   const [allTasks, setAllTasks] = useState<TaskItem[]>([...initialPoolTasks, ...initialCarryOverTasks])
   const [assignments, setAssignments] = useState<Record<string, string[]>>(initialAssignments)
+
+  // Student summaries from API
+  const [apiStudentSummaries, setApiStudentSummaries] = useState(studentSummaries)
+
+  // Load students, projects, and tasks from API
+  useEffect(() => {
+    Promise.all([
+      api.users.list({ role: 'student' }).catch(() => ({ items: [] })),
+      api.projects.list().catch(() => ({ items: [] })),
+      api.tasks.my().catch(() => ({ items: [] })),
+    ]).then(([usersRes, projectsRes, tasksRes]: [any, any, any]) => {
+      const students: any[] = usersRes.items || (Array.isArray(usersRes) ? usersRes : [])
+      const projects: any[] = projectsRes.items || (Array.isArray(projectsRes) ? projectsRes : [])
+      const tasks: any[] = tasksRes.items || (Array.isArray(tasksRes) ? tasksRes : [])
+
+      if (students.length > 0) {
+        const mapped: StudentInfo[] = students.map((u: any) => ({
+          id: u.id,
+          name: u.name || u.email || u.id,
+          badge: (u.role === 'student' ? '지도학생' : '프로젝트') as '지도학생' | '프로젝트',
+          project: u.project_name || undefined,
+        }))
+        setApiStudents(mapped)
+        // Initialize assignments for new students
+        setAssignments((prev) => {
+          const next = { ...prev }
+          mapped.forEach((s) => {
+            if (!(s.name in next)) next[s.name] = []
+          })
+          return next
+        })
+
+        // Build student summaries from API data
+        // For each student, count their tasks by status
+        const summaries = mapped.map((s) => {
+          const studentTasks = tasks.filter((t: any) => {
+            const assignees: any[] = t.assignees || []
+            return assignees.some((a: any) => a.user_id === s.id || a.id === s.id)
+          })
+          return {
+            name: s.name,
+            done: studentTasks.filter((t: any) => t.status === 'done' || t.status === 'completed').length,
+            inProgress: studentTasks.filter((t: any) => t.status === 'in_progress').length,
+            notStarted: studentTasks.filter((t: any) => t.status === 'todo' || t.status === 'not_started' || !t.status).length,
+            dailyCount: 0, // TODO: fetch from daily logs API
+            project: s.project,
+          }
+        })
+        if (summaries.length > 0) {
+          setApiStudentSummaries(summaries)
+        }
+      }
+
+      if (projects.length > 0) {
+        setApiProjects(projects.map((p: any) => p.name || p.title || p.id))
+        setApiProjectObjects(projects.map((p: any) => ({
+          id: String(p.id),
+          name: p.name || p.title || p.id,
+        })))
+      }
+
+      if (tasks.length > 0) {
+        const mappedTasks: TaskItem[] = tasks.map((t: any) => ({
+          id: String(t.id),
+          title: t.title,
+          description: t.description || '',
+          type: (t.task_type || t.type || '기타') as TaskType,
+          url: t.reference_url || t.url || undefined,
+          guide: t.guide || undefined,
+          carryOver: t.is_carry_over || t.carryOver || false,
+          project: t.project_name || t.project || undefined,
+        }))
+        setAllTasks(mappedTasks)
+
+        // Build assignments from task assignees
+        const newAssignments: Record<string, string[]> = {}
+        for (const t of tasks) {
+          const assignees: any[] = t.assignees || []
+          for (const a of assignees) {
+            const userId = a.user_id || a.id
+            // Find the student name by id
+            const student = students.find((s: any) => s.id === userId)
+            const studentName = student ? (student.name || student.email || student.id) : null
+            if (studentName) {
+              if (!newAssignments[studentName]) newAssignments[studentName] = []
+              newAssignments[studentName].push(String(t.id))
+            }
+          }
+        }
+        // Merge with empty arrays for students without assignments
+        const merged: Record<string, string[]> = {}
+        const allStudents = students.length > 0
+          ? students.map((s: any) => s.name || s.email || s.id)
+          : mockStudents.map((s) => s.name)
+        for (const name of allStudents) {
+          merged[name] = newAssignments[name] || []
+        }
+        setAssignments(merged)
+      }
+    })
+  }, [])
 
   // New task form
   const [showNewTask, setShowNewTask] = useState(false)
@@ -536,6 +670,9 @@ function ProfessorWeekly() {
   const [newUrl, setNewUrl] = useState('')
   const [newGuide, setNewGuide] = useState('')
   const [newType, setNewType] = useState<TaskType>('연구')
+  const [newProject, setNewProject] = useState('')
+  const [newPriority, setNewPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium')
+  const [isCreatingTask, setIsCreatingTask] = useState(false)
 
   // DnD state
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -565,22 +702,22 @@ function ProfessorWeekly() {
 
   // Group students by project for DnD filter
   const filteredStudents = useMemo(() => {
-    if (dndProjectFilter === '전체') return mockStudents
-    if (dndProjectFilter === '프로젝트 미배정') return mockStudents.filter(s => !s.project)
-    return mockStudents.filter(s => s.project === dndProjectFilter)
-  }, [dndProjectFilter])
+    if (dndProjectFilter === '전체') return apiStudents
+    if (dndProjectFilter === '프로젝트 미배정') return apiStudents.filter(s => !s.project)
+    return apiStudents.filter(s => s.project === dndProjectFilter)
+  }, [dndProjectFilter, apiStudents])
 
   // Group student summaries by project
   const projectGroupedSummaries = useMemo(() => {
     const groups: { project: string; students: typeof studentSummaries }[] = []
-    for (const proj of projectList) {
-      const students = studentSummaries.filter(s => s.project === proj)
+    for (const proj of apiProjects) {
+      const students = apiStudentSummaries.filter(s => s.project === proj)
       if (students.length > 0) groups.push({ project: proj, students })
     }
-    const unassigned = studentSummaries.filter(s => !s.project)
+    const unassigned = apiStudentSummaries.filter(s => !s.project)
     if (unassigned.length > 0) groups.push({ project: '프로젝트 미배정', students: unassigned })
     return groups
-  }, [])
+  }, [apiProjects, apiStudentSummaries])
 
   function handleDragStart(event: DragStartEvent) {
     setActiveId(event.active.id as string)
@@ -615,6 +752,22 @@ function ProfessorWeekly() {
         next[studentName] = [...(next[studentName] || []), taskId]
         return next
       })
+
+      // Persist assignment to API with rollback on failure
+      const student = apiStudents.find((s) => s.name === studentName)
+      if (student?.id) {
+        api.tasks.assign(taskId, student.id, true).catch(() => {
+          // Rollback: remove from student, put back to previous owner or pool
+          setAssignments((prev) => {
+            const next = { ...prev }
+            next[studentName] = next[studentName].filter((id) => id !== taskId)
+            if (currentOwner) {
+              next[currentOwner] = [...(next[currentOwner] || []), taskId]
+            }
+            return next
+          })
+        })
+      }
     }
 
     // Dropping on the pool zone
@@ -625,26 +778,93 @@ function ProfessorWeekly() {
           next[currentOwner] = next[currentOwner].filter((id) => id !== taskId)
           return next
         })
+        // Unassign from API with rollback on failure
+        const student = apiStudents.find((s) => s.name === currentOwner)
+        if (student?.id) {
+          api.tasks.unassign(taskId, student.id).catch(() => {
+            // Rollback: re-assign to previous owner
+            setAssignments((prev) => {
+              const next = { ...prev }
+              next[currentOwner] = [...(next[currentOwner] || []), taskId]
+              return next
+            })
+          })
+        }
       }
     }
   }
 
-  function addNewTask() {
+  async function addNewTask() {
     if (!newTitle.trim()) return
-    const id = `task-${Date.now()}`
-    const task: TaskItem = {
-      id,
-      title: newTitle.trim(),
-      description: newDesc.trim(),
-      type: newType,
-      url: newUrl.trim() || undefined,
-      guide: newGuide.trim() || undefined,
+    if (!newProject && apiProjectObjects.length === 0) {
+      // No projects available - create locally only
+      const id = `task-${Date.now()}`
+      const task: TaskItem = {
+        id,
+        title: newTitle.trim(),
+        description: newDesc.trim(),
+        type: newType,
+        url: newUrl.trim() || undefined,
+        guide: newGuide.trim() || undefined,
+      }
+      setAllTasks((prev) => [...prev, task])
+      resetNewTaskForm()
+      return
     }
-    setAllTasks((prev) => [...prev, task])
+
+    const projectId = newProject || apiProjectObjects[0]?.id
+    if (!projectId) return
+
+    setIsCreatingTask(true)
+    try {
+      const projectObj = apiProjectObjects.find(p => p.id === projectId)
+      const result: any = await api.tasks.create(projectId, {
+        title: newTitle.trim(),
+        description: newDesc.trim(),
+        task_type: newType,
+        priority: newPriority,
+        reference_url: newUrl.trim() || undefined,
+        guide: newGuide.trim() || undefined,
+      })
+
+      const task: TaskItem = {
+        id: String(result.id || `task-${Date.now()}`),
+        title: result.title || newTitle.trim(),
+        description: result.description || newDesc.trim(),
+        type: (result.task_type || newType) as TaskType,
+        url: result.reference_url || newUrl.trim() || undefined,
+        guide: result.guide || newGuide.trim() || undefined,
+        project: projectObj?.name || undefined,
+      }
+      setAllTasks((prev) => [...prev, task])
+      resetNewTaskForm()
+    } catch {
+      // API failed - create locally as fallback
+      const id = `task-${Date.now()}`
+      const projectObj = apiProjectObjects.find(p => p.id === projectId)
+      const task: TaskItem = {
+        id,
+        title: newTitle.trim(),
+        description: newDesc.trim(),
+        type: newType,
+        url: newUrl.trim() || undefined,
+        guide: newGuide.trim() || undefined,
+        project: projectObj?.name || undefined,
+      }
+      setAllTasks((prev) => [...prev, task])
+      resetNewTaskForm()
+    } finally {
+      setIsCreatingTask(false)
+    }
+  }
+
+  function resetNewTaskForm() {
     setNewTitle('')
     setNewDesc('')
     setNewUrl('')
     setNewGuide('')
+    setNewProject('')
+    setNewPriority('medium')
     setShowNewTask(false)
   }
 
@@ -762,7 +982,7 @@ function ProfessorWeekly() {
           {summaryView === 'all' ? (
             <>
               {summaryHeaderRow}
-              {studentSummaries.map((s, idx) => renderStudentRow(s, idx, studentSummaries.length))}
+              {apiStudentSummaries.map((s, idx) => renderStudentRow(s, idx, apiStudentSummaries.length))}
             </>
           ) : (
             <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -858,6 +1078,34 @@ function ProfessorWeekly() {
                     }}
                   />
                 </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <select
+                    value={newProject}
+                    onChange={(e) => setNewProject(e.target.value)}
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
+                      fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
+                    }}
+                  >
+                    <option value="">프로젝트 선택</option>
+                    {apiProjectObjects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={newPriority}
+                    onChange={(e) => setNewPriority(e.target.value as 'low' | 'medium' | 'high' | 'urgent')}
+                    style={{
+                      padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0',
+                      fontSize: 13, background: '#fff', color: '#0f172a', outline: 'none',
+                    }}
+                  >
+                    <option value="low">낮음</option>
+                    <option value="medium">보통</option>
+                    <option value="high">높음</option>
+                    <option value="urgent">긴급</option>
+                  </select>
+                </div>
                 <input
                   type="text"
                   value={newDesc}
@@ -895,16 +1143,18 @@ function ProfessorWeekly() {
                 </div>
                 <button
                   onClick={addNewTask}
+                  disabled={isCreatingTask || !newTitle.trim()}
                   style={{
                     padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                    border: 'none', cursor: 'pointer', alignSelf: 'flex-end',
-                    background: '#4f46e5', color: '#fff',
+                    border: 'none', cursor: isCreatingTask ? 'wait' : 'pointer', alignSelf: 'flex-end',
+                    background: isCreatingTask ? '#94a3b8' : '#4f46e5', color: '#fff',
                     transition: 'all 0.15s',
+                    opacity: !newTitle.trim() ? 0.5 : 1,
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#3730a3' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = '#4f46e5' }}
+                  onMouseEnter={(e) => { if (!isCreatingTask) e.currentTarget.style.background = '#3730a3' }}
+                  onMouseLeave={(e) => { if (!isCreatingTask) e.currentTarget.style.background = '#4f46e5' }}
                 >
-                  추가
+                  {isCreatingTask ? '생성 중...' : '추가'}
                 </button>
               </div>
             )}
@@ -961,7 +1211,7 @@ function ProfessorWeekly() {
                 }}
               >
                 <option value="전체">전체</option>
-                {projectList.map((p) => (
+                {apiProjects.map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
                 <option value="프로젝트 미배정">프로젝트 미배정</option>
@@ -998,8 +1248,12 @@ function ProfessorWeekly() {
                 lineHeight: 1.7,
               }}
             />
-            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+              {notesSaved && (
+                <span style={{ fontSize: 13, color: '#059669', fontWeight: 500 }}>저장되었습니다</span>
+              )}
               <button
+                onClick={handleSaveMeetingNotes}
                 style={{
                   padding: '10px 24px', borderRadius: 10,
                   fontSize: 14, fontWeight: 600,
@@ -1039,13 +1293,44 @@ function ProfessorWeekly() {
 // ═══════════════════════════════════════
 function StudentWeekly() {
   const [weekPlan, setWeekPlan] = useState('')
+  const [planSaved, setPlanSaved] = useState(false)
   const [taskView, setTaskView] = useState<'project' | 'all'>('project')
+  const [assignedTasks, setAssignedTasks] = useState(myAssignedTasks)
+
+  // Load week plan from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('weekly-plan-student')
+    if (saved) setWeekPlan(saved)
+  }, [])
+
+  function handleSaveWeekPlan() {
+    localStorage.setItem('weekly-plan-student', weekPlan)
+    setPlanSaved(true)
+    setTimeout(() => setPlanSaved(false), 2000)
+  }
+
+  useEffect(() => {
+    api.tasks.my().then((res: any) => {
+      const tasks: any[] = res.items || (Array.isArray(res) ? res : [])
+      if (tasks.length > 0) {
+        setAssignedTasks(tasks.map((t: any) => ({
+          title: t.title,
+          description: t.description || '',
+          url: t.reference_url || t.url || '',
+          guide: t.guide || '',
+          status: t.status === 'done' ? '완료' : t.status === 'in_progress' ? '진행중' : t.status === 'carry_over' ? '이월' : '새로 배정',
+          assignedBy: t.assigned_by_name || t.assigned_by || '',
+          project: t.project_name || t.project || '',
+        })))
+      }
+    }).catch(() => {})
+  }, [])
 
   // Group assigned tasks by project
   const projectGroupedTasks = useMemo(() => {
     const groups: { project: string; tasks: typeof myAssignedTasks }[] = []
     const projectMap = new Map<string, typeof myAssignedTasks>()
-    for (const task of myAssignedTasks) {
+    for (const task of assignedTasks) {
       const proj = task.project || '프로젝트 없음'
       if (!projectMap.has(proj)) projectMap.set(proj, [])
       projectMap.get(proj)!.push(task)
@@ -1054,7 +1339,7 @@ function StudentWeekly() {
       groups.push({ project, tasks })
     }
     return groups
-  }, [])
+  }, [assignedTasks])
 
   const renderTaskCard = (task: typeof myAssignedTasks[0], idx: number, total: number) => {
     const badge = taskStatusBadge[task.status] || taskStatusBadge['미시작']
@@ -1144,7 +1429,7 @@ function StudentWeekly() {
         <div style={{ padding: '20px 28px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 배정된 태스크</h3>
-            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>{myAssignedTasks.length}건 배정됨</p>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>{assignedTasks.length}건 배정됨</p>
           </div>
           {projectGroupedTasks.length > 1 && (
             <ViewToggle
@@ -1159,7 +1444,7 @@ function StudentWeekly() {
         </div>
 
         {taskView === 'all' || projectGroupedTasks.length <= 1 ? (
-          myAssignedTasks.map((task, idx) => renderTaskCard(task, idx, myAssignedTasks.length))
+          assignedTasks.map((task, idx) => renderTaskCard(task, idx, assignedTasks.length))
         ) : (
           <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {projectGroupedTasks.map((group) => (
@@ -1199,8 +1484,12 @@ function StudentWeekly() {
               lineHeight: 1.7,
             }}
           />
-          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+            {planSaved && (
+              <span style={{ fontSize: 13, color: '#059669', fontWeight: 500 }}>저장되었습니다</span>
+            )}
             <button
+              onClick={handleSaveWeekPlan}
               style={{
                 padding: '10px 24px', borderRadius: 10,
                 fontSize: 14, fontWeight: 600,

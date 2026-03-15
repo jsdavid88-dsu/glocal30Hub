@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useRole, type Role } from '../contexts/RoleContext'
+import { useAuth } from '../contexts/AuthContext'
 
 const allNavItems = [
   {
@@ -38,6 +39,7 @@ const roleBadgeColors: Record<Role, { bg: string; color: string }> = {
 export default function Layout() {
   const location = useLocation()
   const { currentRole, setRole } = useRole()
+  const { user, logout } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [width, setWidth] = useState(window.innerWidth)
 
@@ -209,15 +211,15 @@ export default function Layout() {
               </div>
               {isDesktop && (
                 <div>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: '#0f172a', lineHeight: 1 }}>{rc.title}</p>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: '#0f172a', lineHeight: 1 }}>{user?.name ?? rc.title}</p>
                   <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{rc.subtitle}</p>
                 </div>
               )}
-              <Link to="/login" title="로그아웃" style={{ padding: 6, borderRadius: 8, display: 'flex', textDecoration: 'none', color: '#94a3b8' }}>
+              <button onClick={logout} title="로그아웃" style={{ padding: 6, borderRadius: 8, display: 'flex', background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}>
                 <svg style={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                 </svg>
-              </Link>
+              </button>
             </div>
           </div>
         </header>

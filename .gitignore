@@ -31,3 +31,7 @@ docker-compose.override.yml
 
 # Claude Code
 .claude/
+
+# Screenshots (dev/test)
+*.png
+.playwright-mcp/

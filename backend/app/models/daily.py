@@ -46,6 +46,7 @@ class DailyLog(UUIDMixin, TimestampMixin, Base):
     date: Mapped[date] = mapped_column(Date, nullable=False)
     raw_content: Mapped[str] = mapped_column(String, nullable=False, server_default="''")
 
+    author: Mapped["User"] = relationship()
     blocks: Mapped[list["DailyBlock"]] = relationship(back_populates="daily_log")
 
 

@@ -1,22 +1,5 @@
-import { useState } from 'react'
-
-const userInfo = {
-  name: '김연구',
-  email: 'kim.research@university.ac.kr',
-  role: '연구책임자 (PI)',
-  department: '디지털콘텐츠학과',
-  phone: '010-1234-5678',
-  joinDate: '2020-03-01',
-  researchAreas: ['AI/ML', 'Computer Vision', 'Digital Humanities', 'Animation'],
-  bio: 'AI 기반 디지털 콘텐츠 생성 및 분석에 관한 연구를 수행하고 있습니다. 특히 애니메이션 자동 생성 파이프라인과 서사 분석 프레임워크에 관심을 가지고 있습니다.',
-}
-
-const advisorInfo = {
-  name: '박지도',
-  email: 'park.advisor@university.ac.kr',
-  role: '지도교수',
-  department: '디지털콘텐츠학과',
-}
+import { useState, useEffect } from 'react'
+import { api } from '../api/client'
 
 const projectHistory = [
   { name: 'KOCCA AI Animation Pipeline', role: 'PI', period: '2025.01 ~ 2026.06', status: '진행중' },
@@ -33,9 +16,50 @@ const cardStyle = {
 
 export default function Profile() {
   const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(userInfo.name)
-  const [bio, setBio] = useState(userInfo.bio)
-  const [areas, setAreas] = useState(userInfo.researchAreas.join(', '))
+  const [userId, setUserId] = useState<string | null>(null)
+  const [name, setName] = useState('김연구')
+  const [bio, setBio] = useState('')
+  const [areas, setAreas] = useState('')
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState('')
+  const [department, setDepartment] = useState('')
+  const [phone, setPhone] = useState('')
+  const [joinDate, setJoinDate] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.auth.me().then((user: any) => {
+      setUserId(user.id || null)
+      setName(user.name || '')
+      setBio(user.bio || '')
+      setEmail(user.email || '')
+      setRole(user.role || '')
+      setDepartment(user.department || user.major_field || '')
+      setPhone(user.phone || '')
+      setJoinDate(user.created_at ? user.created_at.slice(0, 10) : '')
+      const interestFields = user.interest_fields || []
+      setAreas(Array.isArray(interestFields) ? interestFields.join(', ') : interestFields)
+    }).catch(() => {
+      // Fallback to placeholder values on error
+    })
+  }, [])
+
+  async function handleSave() {
+    if (!userId) return
+    setSaving(true)
+    try {
+      await api.users.update(userId, {
+        name,
+        bio,
+        interest_fields: areas.split(',').map((a: string) => a.trim()).filter(Boolean),
+      })
+      setEditing(false)
+    } catch {
+      // ignore error silently
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto' }}>
@@ -76,7 +100,7 @@ export default function Profile() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   <span style={{ color: '#fff', fontSize: 36, fontWeight: 700 }}>
-                    {userInfo.name.charAt(0)}
+                    {name.charAt(0) || '?'}
                   </span>
                 </div>
                 {editing && (
@@ -93,11 +117,11 @@ export default function Profile() {
               <div style={{ flex: 1, minWidth: 280 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20 }}>
                   <InfoField label="이름" value={name} editing={editing} onChange={setName} />
-                  <InfoField label="이메일" value={userInfo.email} editing={false} />
-                  <InfoField label="역할" value={userInfo.role} editing={false} />
-                  <InfoField label="소속" value={userInfo.department} editing={false} />
-                  <InfoField label="연락처" value={userInfo.phone} editing={false} />
-                  <InfoField label="합류일" value={userInfo.joinDate} editing={false} />
+                  <InfoField label="이메일" value={email} editing={false} />
+                  <InfoField label="역할" value={role} editing={false} />
+                  <InfoField label="소속" value={department} editing={false} />
+                  <InfoField label="연락처" value={phone} editing={false} />
+                  <InfoField label="합류일" value={joinDate} editing={false} />
                 </div>
 
                 <div style={{ marginTop: 20 }}>
@@ -116,7 +140,7 @@ export default function Profile() {
                     />
                   ) : (
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
-                      {userInfo.researchAreas.map((area) => (
+                      {areas.split(',').map((area) => area.trim()).filter(Boolean).map((area) => (
                         <span key={area} style={{
                           padding: '4px 12px', borderRadius: 99, fontSize: 12, fontWeight: 500,
                           background: '#e0e7ff', color: '#4338ca',
@@ -144,17 +168,21 @@ export default function Profile() {
                       }}
                     />
                   ) : (
-                    <p style={{ fontSize: 14, color: '#334155', lineHeight: 1.7 }}>{userInfo.bio}</p>
+                    <p style={{ fontSize: 14, color: '#334155', lineHeight: 1.7 }}>{bio}</p>
                   )}
                 </div>
 
                 {editing && (
                   <div style={{ marginTop: 20, display: 'flex', gap: 8 }}>
-                    <button style={{
-                      padding: '8px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                      background: '#4f46e5', color: '#fff', border: 'none', cursor: 'pointer',
-                    }}>
-                      저장
+                    <button
+                      onClick={handleSave}
+                      disabled={saving}
+                      style={{
+                        padding: '8px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                        background: saving ? '#c7d2fe' : '#4f46e5', color: '#fff', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {saving ? '저장 중...' : '저장'}
                     </button>
                   </div>
                 )}

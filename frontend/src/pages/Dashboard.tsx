@@ -1,19 +1,14 @@
+import { useState, useEffect } from 'react'
 import { useRole, type Role } from '../contexts/RoleContext'
+import { api } from '../api/client'
 
-// ─── Professor Mock Data ───
-const professorStudents = [
-  { name: '한감성', type: '지도학생', project: 'KOCCA AI Animation', dailyStatus: '제출', attendance: '출근' },
-  { name: '윤스마', type: '지도학생', project: 'MSIT Smart Campus', dailyStatus: '미제출', attendance: '출근' },
-  { name: '정인턴', type: '지도학생', project: 'KOCCA AI Animation', dailyStatus: '제출', attendance: '지각' },
-  { name: '강데이', type: '지도학생', project: 'NRF GCA / Digital Heritage', dailyStatus: '제출', attendance: '출근' },
-  { name: '송리서', type: '지도학생', project: 'XR Immersive Learning', dailyStatus: '미제출', attendance: '미출근' },
-  { name: '박프로', type: '프로젝트', project: 'KOCCA AI Animation', dailyStatus: '제출', attendance: '출근' },
-  { name: '최외부', type: '프로젝트', project: 'Digital Heritage Archive', dailyStatus: '제출', attendance: '출근' },
-  { name: '임연구', type: '프로젝트', project: 'NRF GCA', dailyStatus: '미제출', attendance: '미출근' },
-]
+// ─── Types ───
+type StudentRow = { name: string; type: string; project: string; dailyStatus: string; attendance: string }
+type TaskRow = { title: string; project: string; status: '완료' | '진행중' | '미시작'; url: string; guide: string }
 
-const professorTaskSummary = { done: 12, inProgress: 8, notStarted: 5 }
+// ─── MOCK DATA: Replace with real API calls when endpoints are ready ───
 
+// MOCK DATA — TODO Phase 3: Replace with notifications/issues API
 const professorIssues = [
   { student: '윤스마', issue: 'GPU 서버 접근 권한 요청', time: '2시간 전', urgent: true },
   { student: '정인턴', issue: '중간발표 자료 리뷰 요청', time: '5시간 전', urgent: false },
@@ -21,79 +16,18 @@ const professorIssues = [
   { student: '송리서', issue: '출결 관련 상담 요청', time: '1일 전', urgent: false },
 ]
 
+// MOCK DATA — TODO Phase 3: Connect to events API (endpoint exists but router not mounted yet)
 const professorMilestones = [
   { title: 'KOCCA Phase 2 중간보고', project: 'KOCCA AI Animation', date: '2026-03-15', daysLeft: 4 },
   { title: 'NRF 연차보고서 제출', project: 'NRF GCA', date: '2026-03-20', daysLeft: 9 },
   { title: 'Digital Heritage 최종 납품', project: 'Digital Heritage Archive', date: '2026-03-31', daysLeft: 20 },
 ]
 
-// ─── Student Mock Data ───
-const studentTasks = [
-  {
-    title: 'GAN 논문 리뷰 (Section 3 중심)',
-    project: 'KOCCA AI Animation',
-    status: '진행중' as const,
-    url: 'https://arxiv.org/abs/2024.12345',
-    guide: 'Section 3의 loss function 분석에 집중. 기존 DCGAN과 비교 정리할 것.',
-  },
-  {
-    title: 'Diffusion 모델 v3 학습 실행',
-    project: 'KOCCA AI Animation',
-    status: '미시작' as const,
-    url: '',
-    guide: 'v2 체크포인트 기반으로 fine-tuning. batch size 16, lr 1e-4로 시작.',
-  },
-  {
-    title: '중간보고서 Section 2 작성',
-    project: 'KOCCA AI Animation',
-    status: '진행중' as const,
-    url: 'https://docs.google.com/doc/d/abc',
-    guide: '실험 결과 표와 그래프 포함. 3페이지 이내.',
-  },
-  {
-    title: '데이터셋 전처리 스크립트 완성',
-    project: 'NRF GCA',
-    status: '완료' as const,
-    url: '',
-    guide: '',
-  },
-]
-
-const studentWeeklyProgress = { done: 3, total: 7 }
-
+// MOCK DATA — TODO Phase 3: Replace with events API (calendar events for today)
 const studentSchedule = [
   { time: '10:00', title: 'KOCCA 주간 미팅', type: '회의' },
   { time: '14:00', title: '지도교수 면담', type: '면담' },
   { time: '16:00', title: 'GPU 서버 점검', type: '작업' },
-]
-
-// ─── External Mock Data ───
-const externalProjects = [
-  {
-    name: 'KOCCA AI Animation Pipeline',
-    code: 'KOCCA-2025-001',
-    progress: 65,
-    recentIssues: [
-      { title: '렌더링 서버 연동 지연', priority: '긴급' as const },
-      { title: 'Asset 전달 일정 조율', priority: '보통' as const },
-    ],
-    recentTasks: [
-      { title: '3D Asset 납품 (Phase 2)', deadline: '2026-03-15', status: '진행중' as const },
-      { title: '렌더팜 연동 테스트', deadline: '2026-03-20', status: '미시작' as const },
-    ],
-  },
-  {
-    name: 'Digital Heritage Archive',
-    code: 'MOC-2025-017',
-    progress: 90,
-    recentIssues: [
-      { title: '스캔 데이터 포맷 호환성', priority: '보통' as const },
-    ],
-    recentTasks: [
-      { title: '포인트 클라우드 변환 납품', deadline: '2026-03-25', status: '진행중' as const },
-      { title: '최종 QA 리포트', deadline: '2026-03-31', status: '미시작' as const },
-    ],
-  },
 ]
 
 // ─── Shared Styles ───
@@ -161,10 +95,6 @@ const taskStatusBadge = (status: '완료' | '진행중' | '미시작') => {
   return badgeStyle('#f1f5f9', 'var(--color-text-muted)')
 }
 
-const priorityBadge = (priority: '긴급' | '보통') => {
-  if (priority === '긴급') return badgeStyle('var(--color-danger-light)', 'var(--color-danger)')
-  return badgeStyle('var(--color-warning-light)', 'var(--color-warning)')
-}
 
 // ─── Main Component ───
 export default function Dashboard() {
@@ -223,11 +153,51 @@ export default function Dashboard() {
 // ─── Professor View ───
 // ════════════════════════════════════════
 function ProfessorView() {
-  const submitted = professorStudents.filter(s => s.dailyStatus === '제출').length
-  const notSubmitted = professorStudents.filter(s => s.dailyStatus === '미제출').length
-  const attendPresent = professorStudents.filter(s => s.attendance === '출근').length
-  const attendLate = professorStudents.filter(s => s.attendance === '지각').length
-  const attendAbsent = professorStudents.filter(s => s.attendance === '미출근').length
+  const [students, setStudents] = useState<StudentRow[]>([])
+  const [taskSummary, setTaskSummary] = useState({ done: 0, inProgress: 0, notStarted: 0 })
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+
+    Promise.all([
+      api.users.list({ role: 'student' }).catch(() => null),
+      api.tasks.my().catch(() => null),
+      // Fetch today's daily logs to determine submission status
+      api.daily.list({ date_from: today, date_to: today }).catch(() => null),
+    ]).then(([apiStudents, apiTasks, apiDailyLogs]) => {
+      // Collect author IDs who submitted daily logs today
+      const dailyLogEntries: any[] = (apiDailyLogs as any)?.data || []
+      const submittedAuthorIds = new Set(dailyLogEntries.map((log: any) => log.author_id || log.author?.id))
+
+      // Map students: response shape is { data: UserSummaryResponse[], meta: dict }
+      const rawStudents: any[] = (apiStudents as any)?.data || []
+      setStudents(rawStudents.map((s: any) => ({
+        name: s.name || '',
+        type: '지도학생',
+        project: s.major_field || '',
+        // Real daily submission status from daily-logs API
+        dailyStatus: submittedAuthorIds.has(s.id) ? '제출' : '미제출',
+        // TODO Phase 3: Replace with attendance API
+        attendance: '미출근',
+      })))
+
+      // Map tasks: response shape is { data: TaskSummaryResponse[], meta: dict }
+      const rawTasks: any[] = (apiTasks as any)?.data || []
+      const done = rawTasks.filter((t: any) => t.status === 'done' || t.status === 'completed').length
+      const inProgress = rawTasks.filter((t: any) => t.status === 'in_progress').length
+      const notStarted = rawTasks.filter((t: any) => t.status === 'not_started' || t.status === 'new').length
+      setTaskSummary({ done, inProgress, notStarted })
+    }).finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '48px', color: 'var(--color-text-muted)', textAlign: 'center' }}>로딩 중...</div>
+
+  const submitted = students.filter(s => s.dailyStatus === '제출').length
+  const notSubmitted = students.filter(s => s.dailyStatus === '미제출').length
+  const attendPresent = students.filter(s => s.attendance === '출근').length
+  const attendLate = students.filter(s => s.attendance === '지각').length
+  const attendAbsent = students.filter(s => s.attendance === '미출근').length
 
   return (
     <div>
@@ -240,7 +210,7 @@ function ProfessorView() {
           </p>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--color-accent)', lineHeight: 1 }}>{submitted}</span>
-            <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>/ {professorStudents.length}명 제출</span>
+            <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>/ {students.length}명 제출</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <span style={badgeStyle('var(--color-success-light)', 'var(--color-success)')}>제출 {submitted}</span>
@@ -255,7 +225,7 @@ function ProfessorView() {
           </p>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--color-success)', lineHeight: 1 }}>{attendPresent + attendLate}</span>
-            <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>/ {professorStudents.length}명 출근</span>
+            <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>/ {students.length}명 출근</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <span style={badgeStyle('var(--color-accent-light)', 'var(--color-accent-dark)')}>출근 {attendPresent}</span>
@@ -271,21 +241,21 @@ function ProfessorView() {
           </p>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--color-accent)', lineHeight: 1 }}>
-              {professorTaskSummary.done + professorTaskSummary.inProgress + professorTaskSummary.notStarted}
+              {taskSummary.done + taskSummary.inProgress + taskSummary.notStarted}
             </span>
             <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>건 전체</span>
           </div>
           <div className="dash-grid-3stat">
             <div style={{ textAlign: 'center', padding: '10px 0', borderRadius: 10, background: 'var(--color-success-light)' }}>
-              <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-success)' }}>{professorTaskSummary.done}</p>
+              <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-success)' }}>{taskSummary.done}</p>
               <p style={{ fontSize: 11, color: 'var(--color-success)', fontWeight: 500 }}>완료</p>
             </div>
             <div style={{ textAlign: 'center', padding: '10px 0', borderRadius: 10, background: 'var(--color-accent-light)' }}>
-              <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-accent)' }}>{professorTaskSummary.inProgress}</p>
+              <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-accent)' }}>{taskSummary.inProgress}</p>
               <p style={{ fontSize: 11, color: 'var(--color-accent)', fontWeight: 500 }}>진행중</p>
             </div>
             <div style={{ textAlign: 'center', padding: '10px 0', borderRadius: 10, background: '#f1f5f9' }}>
-              <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-text-muted)' }}>{professorTaskSummary.notStarted}</p>
+              <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-text-muted)' }}>{taskSummary.notStarted}</p>
               <p style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500 }}>미시작</p>
             </div>
           </div>
@@ -300,7 +270,7 @@ function ProfessorView() {
             <div style={{ ...sectionHeaderStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
                 <h3 style={sectionTitleStyle}>내 학생들</h3>
-                <p style={sectionSubtitleStyle}>지도학생 + 프로젝트 학생 통합 ({professorStudents.length}명)</p>
+                <p style={sectionSubtitleStyle}>지도학생 + 프로젝트 학생 통합 ({students.length}명)</p>
               </div>
               <button style={{
                 fontSize: 14, fontWeight: 500, color: 'var(--color-accent)', background: 'none',
@@ -310,12 +280,12 @@ function ProfessorView() {
               </button>
             </div>
             <div>
-              {professorStudents.map((student, idx) => (
+              {students.map((student, idx) => (
                 <div
                   key={student.name}
                   style={{
                     padding: '16px 28px',
-                    borderBottom: idx < professorStudents.length - 1 ? '1px solid #f8fafc' : 'none',
+                    borderBottom: idx < students.length - 1 ? '1px solid #f8fafc' : 'none',
                     cursor: 'pointer',
                     transition: 'background 0.15s',
                   }}
@@ -447,20 +417,56 @@ function ProfessorView() {
 // ─── Student View ───
 // ════════════════════════════════════════
 function StudentView() {
-  const progressPct = Math.round((studentWeeklyProgress.done / studentWeeklyProgress.total) * 100)
+  const [tasks, setTasks] = useState<TaskRow[]>([])
+  const [weeklyProgress, setWeeklyProgress] = useState({ done: 0, total: 0 })
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.tasks.my()
+      .then((apiTasks: any) => {
+        // Response shape: { data: TaskSummaryResponse[], meta: dict }
+        const items: any[] = apiTasks?.data || []
+        const statusMap: Record<string, '완료' | '진행중' | '미시작'> = {
+          done: '완료', completed: '완료',
+          in_progress: '진행중',
+          not_started: '미시작', new: '미시작',
+        }
+        const mapped: TaskRow[] = items.map((t: any) => ({
+          title: t.title || '',
+          project: '',
+          status: statusMap[t.status] || '미시작',
+          url: '',
+          guide: t.description || '',
+        }))
+        setTasks(mapped)
+        const done = mapped.filter(t => t.status === '완료').length
+        setWeeklyProgress({ done, total: mapped.length })
+      })
+      .catch(() => {
+        setTasks([])
+        setWeeklyProgress({ done: 0, total: 0 })
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '48px', color: 'var(--color-text-muted)', textAlign: 'center' }}>로딩 중...</div>
+
+  const progressPct = weeklyProgress.total > 0
+    ? Math.round((weeklyProgress.done / weeklyProgress.total) * 100)
+    : 0
 
   return (
     <div>
       {/* Top row: Attendance + Daily shortcut + Weekly progress */}
       <div className="dash-summary-grid opacity-0 animate-fade-in stagger-1">
-        {/* Attendance */}
+        {/* TODO Phase 3: Attendance — connect to attendance API for real check-in/check-out */}
         <div style={{
           ...cardStyle, padding: '24px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16,
         }}>
           <div>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>출석 체크</h3>
-            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>오늘 출근: 09:12 | 근무중</p>
+            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>오늘 출근: 09:12 | 근무중</p>{/* MOCK DATA */}
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <button style={{
@@ -481,14 +487,14 @@ function StudentView() {
           </div>
         </div>
 
-        {/* Daily shortcut */}
+        {/* Daily shortcut — TODO Phase 2a: Check if today's daily log exists via api.daily.list */}
         <div style={{
           ...cardStyle, padding: '24px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16,
         }}>
           <div>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>데일리 작성</h3>
-            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>오늘 아직 미작성</p>
+            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>오늘 아직 미작성</p>{/* MOCK DATA */}
           </div>
           <a href="/daily/write" style={{
             padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
@@ -505,7 +511,7 @@ function StudentView() {
           <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 12 }}>이번 주 진행률</p>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 36, fontWeight: 700, color: 'var(--color-accent)', lineHeight: 1 }}>{progressPct}%</span>
-            <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>{studentWeeklyProgress.done}/{studentWeeklyProgress.total}건 완료</span>
+            <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>{weeklyProgress.done}/{weeklyProgress.total}건 완료</span>
           </div>
           <div style={{ height: 8, background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{
@@ -525,17 +531,17 @@ function StudentView() {
               <div>
                 <h3 style={sectionTitleStyle}>오늘 배정된 태스크</h3>
                 <p style={sectionSubtitleStyle}>
-                  {studentTasks.filter(t => t.status !== '완료').length}건 진행중 / {studentTasks.length}건 전체
+                  {tasks.filter(t => t.status !== '완료').length}건 진행중 / {tasks.length}건 전체
                 </p>
               </div>
             </div>
             <div>
-              {studentTasks.map((task, idx) => (
+              {tasks.map((task, idx) => (
                 <div
                   key={idx}
                   style={{
                     padding: '20px 28px',
-                    borderBottom: idx < studentTasks.length - 1 ? '1px solid #f1f5f9' : 'none',
+                    borderBottom: idx < tasks.length - 1 ? '1px solid #f1f5f9' : 'none',
                     opacity: task.status === '완료' ? 0.55 : 1,
                     transition: 'background 0.15s',
                   }}
@@ -608,7 +614,7 @@ function StudentView() {
           </div>
         </div>
 
-        {/* Right column: Schedule */}
+        {/* Right column: Schedule — MOCK DATA, TODO Phase 3: Replace with events API */}
         <div className="opacity-0 animate-fade-in stagger-3">
           <div style={{ ...cardStyle, overflow: 'hidden' }}>
             <div style={sectionHeaderStyle}>
@@ -655,10 +661,34 @@ function StudentView() {
 // ─── External View ───
 // ════════════════════════════════════════
 function ExternalView() {
+  const [projects, setProjects] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.projects.list()
+      .then((res: any) => {
+        // Response shape: { data: ProjectSummaryResponse[], meta: dict }
+        const items: any[] = res?.data || []
+        setProjects(items)
+      })
+      .catch(() => setProjects([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '48px', color: 'var(--color-text-muted)', textAlign: 'center' }}>로딩 중...</div>
+
+  if (projects.length === 0) {
+    return (
+      <div style={{ padding: '48px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+        참여 중인 프로젝트가 없습니다.
+      </div>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {externalProjects.map((project, pi) => (
-        <div key={project.code} className={`opacity-0 animate-fade-in stagger-${pi + 1}`}>
+      {projects.map((project: any, pi: number) => (
+        <div key={project.id || pi} className={`opacity-0 animate-fade-in stagger-${pi + 1}`}>
           <div style={{ ...cardStyle, overflow: 'hidden' }}>
             {/* Project header */}
             <div style={{
@@ -667,80 +697,45 @@ function ExternalView() {
             }}>
               <div>
                 <h3 style={sectionTitleStyle}>{project.name}</h3>
-                <p style={{ ...sectionSubtitleStyle, fontFamily: 'monospace' }}>{project.code}</p>
+                <p style={{ ...sectionSubtitleStyle, fontFamily: 'monospace' }}>{project.status}</p>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <p style={{ fontSize: 20, fontWeight: 700, color: 'var(--color-accent)' }}>{project.progress}%</p>
-                <p style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>진행률</p>
+                <span style={{
+                  display: 'inline-block', padding: '4px 14px', borderRadius: 99,
+                  fontSize: 13, fontWeight: 600,
+                  background: 'var(--color-accent-light)', color: 'var(--color-accent)',
+                }}>
+                  {project.status}
+                </span>
               </div>
             </div>
 
-            {/* Progress bar */}
-            <div style={{ padding: '16px 28px', borderBottom: '1px solid #f1f5f9' }}>
-              <div style={{ height: 8, background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%', background: 'var(--color-accent)', borderRadius: 99,
-                  width: `${project.progress}%`, transition: 'width 0.7s ease',
-                }} />
-              </div>
+            {/* Info section */}
+            <div style={{ padding: '20px 28px' }}>
+              {project.description ? (
+                <p style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+                  {project.description}
+                </p>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>프로젝트 설명 없음</p>
+              )}
+              {project.end_date && (
+                <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 8 }}>
+                  마감일: {project.end_date}
+                </p>
+              )}
             </div>
 
-            {/* Issues + Tasks side by side */}
-            <div className="ext-project-cols">
-              {/* Issues */}
-              <div style={{ padding: '20px 28px' }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 14 }}>최근 이슈</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {project.recentIssues.map((issue, i) => (
-                    <div key={i} style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                    }}>
-                      <p style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>{issue.title}</p>
-                      <span style={priorityBadge(issue.priority)}>{issue.priority}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Tasks */}
-              <div style={{ padding: '20px 28px', borderTop: '1px solid #f1f5f9' }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 14 }}>프로젝트 태스크</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {project.recentTasks.map((task, i) => (
-                    <div key={i} style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={taskStatusBadge(task.status)}>{task.status}</span>
-                        <p style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>{task.title}</p>
-                      </div>
-                      <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>{task.deadline}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {/* Issues section — TODO Phase 3: Replace with tasks/issues API per project */}
+            <div style={{ padding: '12px 28px 20px', borderTop: '1px solid #f1f5f9' }}>
+              <p style={{ fontSize: 13, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                이슈 및 태스크 정보는 준비 중입니다.
+              </p>
             </div>
           </div>
         </div>
       ))}
 
-      <style>{`
-        .ext-project-cols {
-          display: grid;
-          grid-template-columns: 1fr;
-        }
-        @media (min-width: 640px) {
-          .ext-project-cols {
-            grid-template-columns: 1fr 1fr;
-          }
-          .ext-project-cols > div:first-child {
-            border-right: 1px solid #f1f5f9;
-          }
-          .ext-project-cols > div:last-child {
-            border-top: none !important;
-          }
-        }
-      `}</style>
     </div>
   )
 }

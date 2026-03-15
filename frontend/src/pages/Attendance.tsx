@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const weeklyData = [
   { date: '2026-03-09', day: '월', checkIn: '09:12', checkOut: '18:30', hours: 9.3, status: '정상' },
@@ -39,10 +39,71 @@ const cardStyle = {
 }
 
 export default function Attendance() {
-  const [checkedIn, setCheckedIn] = useState(true)
+  const [checkedIn, setCheckedIn] = useState(false)
   const [checkedOut, setCheckedOut] = useState(false)
+  const [checkInTime, setCheckInTime] = useState<string | null>(null)
+  const [checkOutTime, setCheckOutTime] = useState<string | null>(null)
 
-  const now = new Date(2026, 2, 11, 14, 23)
+  useEffect(() => {
+    // TODO: Phase 3 - attendance API
+    fetch('/api/v1/attendance/today', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) {
+          if (data.check_in_time) {
+            setCheckedIn(true)
+            setCheckInTime(data.check_in_time.slice(11, 16))
+          }
+          if (data.check_out_time) {
+            setCheckedOut(true)
+            setCheckOutTime(data.check_out_time.slice(11, 16))
+          }
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  async function handleCheckIn() {
+    // TODO: Phase 3 - attendance API
+    try {
+      const res = await fetch('/api/v1/attendance/check-in', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      })
+      if (!res.ok) throw new Error('API not available')
+      const data = await res.json()
+      setCheckedIn(true)
+      setCheckInTime(data.check_in_time ? data.check_in_time.slice(11, 16) : new Date().toTimeString().slice(0, 5))
+    } catch {
+      alert('출결 기능은 준비 중입니다.')
+    }
+  }
+
+  async function handleCheckOut() {
+    // TODO: Phase 3 - attendance API
+    try {
+      const res = await fetch('/api/v1/attendance/check-out', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+      })
+      if (!res.ok) throw new Error('API not available')
+      const data = await res.json()
+      setCheckedOut(true)
+      setCheckOutTime(data.check_out_time ? data.check_out_time.slice(11, 16) : new Date().toTimeString().slice(0, 5))
+    } catch {
+      alert('출결 기능은 준비 중입니다.')
+    }
+  }
+
+  const now = new Date()
   const todayStr = now.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
   const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 
@@ -69,14 +130,14 @@ export default function Attendance() {
             <div>
               <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 2 }}>출근 시각</p>
               <p style={{ fontSize: 20, fontWeight: 700, color: checkedIn ? '#059669' : '#94a3b8' }}>
-                {checkedIn ? '09:45' : '--:--'}
+                {checkedIn && checkInTime ? checkInTime : '--:--'}
               </p>
             </div>
             <div style={{ width: 1, height: 40, background: '#e2e8f0' }} />
             <div>
               <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 2 }}>퇴근 시각</p>
               <p style={{ fontSize: 20, fontWeight: 700, color: checkedOut ? '#059669' : '#94a3b8' }}>
-                {checkedOut ? '18:00' : '--:--'}
+                {checkedOut && checkOutTime ? checkOutTime : '--:--'}
               </p>
             </div>
             <div style={{ width: 1, height: 40, background: '#e2e8f0' }} />
@@ -95,7 +156,7 @@ export default function Attendance() {
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button
-            onClick={() => setCheckedIn(true)}
+            onClick={handleCheckIn}
             disabled={checkedIn}
             style={{
               padding: '12px 28px', borderRadius: 12, fontSize: 14, fontWeight: 600,
@@ -108,7 +169,7 @@ export default function Attendance() {
             {checkedIn ? '출근 완료' : '출근하기'}
           </button>
           <button
-            onClick={() => setCheckedOut(true)}
+            onClick={handleCheckOut}
             disabled={!checkedIn || checkedOut}
             style={{
               padding: '12px 28px', borderRadius: 12, fontSize: 14, fontWeight: 600,

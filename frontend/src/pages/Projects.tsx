@@ -1,65 +1,19 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRole } from '../contexts/RoleContext'
-
-// ─── Mock Data ───
-const projects = [
-  {
-    name: 'KOCCA AI Animation Pipeline',
-    code: 'KOCCA-2025-001',
-    status: '진행중' as const,
-    progress: 65,
-    pi: '김연구',
-    team: 8,
-    deadline: '2026-06-30',
-  },
-  {
-    name: 'NRF GCA Narratology',
-    code: 'NRF-2025-042',
-    status: '진행중' as const,
-    progress: 40,
-    pi: '이서사',
-    team: 5,
-    deadline: '2027-02-28',
-  },
-  {
-    name: 'Digital Heritage Archive',
-    code: 'MOC-2025-017',
-    status: '검토중' as const,
-    progress: 90,
-    pi: '박디지',
-    team: 6,
-    deadline: '2026-03-31',
-  },
-  {
-    name: 'XR Immersive Learning Platform',
-    code: 'IITP-2026-003',
-    status: '계획중' as const,
-    progress: 10,
-    pi: '최이머',
-    team: 4,
-    deadline: '2027-12-31',
-  },
-  {
-    name: 'Multimodal Sentiment Analysis',
-    code: 'NRF-2026-088',
-    status: '진행중' as const,
-    progress: 25,
-    pi: '한감성',
-    team: 7,
-    deadline: '2028-02-28',
-  },
-  {
-    name: 'Smart Campus IoT Network',
-    code: 'MSIT-2025-055',
-    status: '완료' as const,
-    progress: 100,
-    pi: '윤스마',
-    team: 10,
-    deadline: '2025-12-31',
-  },
-]
+import { api } from '../api/client'
 
 type Status = '진행중' | '검토중' | '계획중' | '완료'
+
+type ProjectRow = {
+  id: string
+  name: string
+  code: string
+  status: Status
+  progress: number
+  pi: string
+  team: number
+  deadline: string
+}
 
 const statusTabs: { label: string; value: Status | 'all' }[] = [
   { label: '전체', value: 'all' },
@@ -87,6 +41,34 @@ export default function Projects() {
   const { currentRole } = useRole()
   const [activeTab, setActiveTab] = useState<Status | 'all'>('all')
   const [search, setSearch] = useState('')
+  const [projects, setProjects] = useState<ProjectRow[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.projects.list()
+      .then((res: any) => {
+        // Response shape: { data: ProjectSummaryResponse[], meta: dict }
+        const items: any[] = res?.data || []
+        const statusMap: Record<string, Status> = {
+          active: '진행중', in_progress: '진행중',
+          review: '검토중',
+          planning: '계획중',
+          completed: '완료', done: '완료',
+        }
+        setProjects(items.map((p: any) => ({
+          id: p.id || '',
+          name: p.name || '',
+          code: p.code || '',
+          status: (statusMap[p.status] || '진행중') as Status,
+          progress: 0,           // not in ProjectSummaryResponse yet
+          pi: '',                // not in ProjectSummaryResponse yet
+          team: 0,               // not in ProjectSummaryResponse yet
+          deadline: p.end_date || '',
+        })))
+      })
+      .catch(() => setProjects([]))
+      .finally(() => setLoading(false))
+  }, [])
 
   const filtered = projects.filter((p) => {
     const matchTab = activeTab === 'all' || p.status === activeTab
@@ -97,6 +79,8 @@ export default function Projects() {
       p.pi.toLowerCase().includes(search.toLowerCase())
     return matchTab && matchSearch
   })
+
+  if (loading) return <div style={{ padding: '48px', color: '#94a3b8', textAlign: 'center' }}>로딩 중...</div>
 
   return (
     <div key="projects" style={{ width: '100%' }}>

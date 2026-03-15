@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { api } from '../api/client'
 
 type TaskStatus = '진행중' | '새로' | '완료' | '블로킹'
 
@@ -10,7 +11,7 @@ interface AssignedTask {
   guide?: string
 }
 
-const mockTasks: AssignedTask[] = [
+const defaultMockTasks: AssignedTask[] = [
   {
     id: 1,
     title: 'GAN 기반 이미지 합성 논문 리뷰',
@@ -56,12 +57,50 @@ const cardStyle = {
 export default function DailyWrite() {
   const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
 
+  const [tasks, setTasks] = useState<AssignedTask[]>(defaultMockTasks)
+  const [saving, setSaving] = useState(false)
+  const [saveMessage, setSaveMessage] = useState('')
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const apiTasks: any = await api.tasks.my()
+        const items = Array.isArray(apiTasks) ? apiTasks : (apiTasks?.data || [])
+        if (items.length > 0) {
+          const statusMap: Record<string, TaskStatus> = {
+            in_progress: '진행중', review: '진행중', '진행중': '진행중',
+            todo: '새로', new: '새로', not_started: '새로', '새로': '새로', '미시작': '새로',
+            done: '완료', completed: '완료', '완료': '완료',
+            blocked: '블로킹', '블로킹': '블로킹',
+          }
+          const mapped: AssignedTask[] = items.map((t: any) => ({
+            id: t.id || Math.random(),
+            title: t.title || '',
+            status: statusMap[t.status] || '새로',
+            url: t.url || t.reference_url || undefined,
+            guide: t.guide || t.description || undefined,
+          }))
+          setTasks(mapped)
+        }
+      } catch {
+        // Backend not available, keep mock data
+      }
+    })()
+  }, [])
+
   const [taskStatuses, setTaskStatuses] = useState<Record<number, TaskStatus>>(
-    Object.fromEntries(mockTasks.map((t) => [t.id, t.status]))
+    Object.fromEntries(defaultMockTasks.map((t) => [t.id, t.status]))
   )
   const [taskProgress, setTaskProgress] = useState<Record<number, string>>(
-    Object.fromEntries(mockTasks.map((t) => [t.id, '']))
+    Object.fromEntries(defaultMockTasks.map((t) => [t.id, '']))
   )
+
+  // Re-initialize statuses when tasks change from API
+  useEffect(() => {
+    setTaskStatuses(Object.fromEntries(tasks.map((t) => [t.id, t.status])))
+    setTaskProgress(Object.fromEntries(tasks.map((t) => [t.id, ''])))
+  }, [tasks])
+
   const [memoContent, setMemoContent] = useState('')
   const [memoVisibility, setMemoVisibility] = useState('advisor')
   const [tags, setTags] = useState<string[]>([])
@@ -79,14 +118,28 @@ export default function DailyWrite() {
     setTags(tags.filter((t) => t !== tag))
   }
 
-  const cycleStatus = (taskId: number) => {
+  const statusToApi: Record<TaskStatus, string> = {
+    '진행중': 'in_progress',
+    '새로': 'not_started',
+    '완료': 'done',
+    '블로킹': 'blocked',
+  }
+
+  const cycleStatus = async (taskId: number) => {
     const order: TaskStatus[] = ['진행중', '완료', '블로킹']
+    let nextStatus: TaskStatus = '진행중'
     setTaskStatuses((prev) => {
       const current = prev[taskId]
       const idx = order.indexOf(current)
-      const next = order[(idx + 1) % order.length]
-      return { ...prev, [taskId]: next }
+      nextStatus = order[(idx + 1) % order.length]
+      return { ...prev, [taskId]: nextStatus }
     })
+    // Persist to backend
+    try {
+      await api.tasks.updateStatus(String(taskId), statusToApi[nextStatus])
+    } catch {
+      // Silently ignore if backend is unavailable — local state still updated
+    }
   }
 
   return (
@@ -109,18 +162,18 @@ export default function DailyWrite() {
             <div>
               <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 배정 태스크</h3>
               <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-                {mockTasks.length}건 배정 / {Object.values(taskStatuses).filter((s) => s === '완료').length}건 완료
+                {tasks.length}건 배정 / {Object.values(taskStatuses).filter((s) => s === '완료').length}건 완료
               </p>
             </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {mockTasks.map((task, idx) => {
-              const st = statusConfig[taskStatuses[task.id]]
+            {tasks.map((task, idx) => {
+              const st = statusConfig[taskStatuses[task.id]] || statusConfig['새로']
               const isCompleted = taskStatuses[task.id] === '완료'
               return (
                 <div key={task.id} style={{
-                  borderBottom: idx < mockTasks.length - 1 ? '1px solid #f1f5f9' : 'none',
+                  borderBottom: idx < tasks.length - 1 ? '1px solid #f1f5f9' : 'none',
                 }}>
                   {/* Task card header */}
                   <div style={{
@@ -313,18 +366,113 @@ export default function DailyWrite() {
         <div className="opacity-0 animate-fade-in stagger-3" style={{
           display: 'flex', gap: 10, justifyContent: 'flex-end', paddingBottom: 32,
         }}>
-          <button style={{
-            padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 500,
-            background: '#f1f5f9', color: '#475569', border: 'none', cursor: 'pointer',
-          }}>
+          {saveMessage && (
+            <span style={{ fontSize: 13, color: saveMessage.includes('실패') ? '#be123c' : '#047857', alignSelf: 'center' }}>
+              {saveMessage}
+            </span>
+          )}
+          <button
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true)
+              setSaveMessage('')
+              try {
+                const todayISO = new Date().toISOString().split('T')[0]
+                // Build raw_content summary for the log
+                const taskLines = tasks
+                  .filter(t => taskProgress[t.id]?.trim())
+                  .map(t => `[${taskStatuses[t.id]}] ${t.title}: ${taskProgress[t.id]}`)
+                const rawContent = [...taskLines, memoContent.trim()].filter(Boolean).join('\n\n')
+                // Create the daily log (draft)
+                const log: any = await api.daily.create({ date: todayISO, raw_content: rawContent })
+                // Build blocks with proper schema
+                let blockOrder = 0
+                const blocks: any[] = []
+                tasks.filter(t => taskProgress[t.id]?.trim()).forEach(t => {
+                  blocks.push({
+                    content: `[${taskStatuses[t.id]}] ${t.title}\n${taskProgress[t.id]}`,
+                    block_order: blockOrder++,
+                    section: 'today',
+                    visibility: 'advisor',
+                  })
+                })
+                if (memoContent.trim()) {
+                  blocks.push({
+                    content: memoContent,
+                    block_order: blockOrder++,
+                    section: 'misc',
+                    visibility: memoVisibility,
+                  })
+                }
+                if (log?.id && blocks.length > 0) {
+                  await api.daily.createBlocks(String(log.id), blocks)
+                }
+                setSaveMessage('임시 저장 완료')
+              } catch {
+                setSaveMessage('저장 실패 (서버 연결 확인)')
+              } finally {
+                setSaving(false)
+              }
+            }}
+            style={{
+              padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 500,
+              background: '#f1f5f9', color: '#475569', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
             임시저장
           </button>
-          <button style={{
-            padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 600,
-            background: '#4f46e5', color: '#fff', border: 'none', cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(79,70,229,0.3)',
-          }}>
-            최종 저장
+          <button
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true)
+              setSaveMessage('')
+              try {
+                const todayISO = new Date().toISOString().split('T')[0]
+                // Build raw_content summary for the log
+                const taskLines = tasks
+                  .filter(t => taskProgress[t.id]?.trim())
+                  .map(t => `[${taskStatuses[t.id]}] ${t.title}: ${taskProgress[t.id]}`)
+                const rawContent = [...taskLines, memoContent.trim()].filter(Boolean).join('\n\n')
+                // Create the daily log (final submit)
+                const log: any = await api.daily.create({ date: todayISO, raw_content: rawContent })
+                // Build blocks with proper schema
+                let blockOrder = 0
+                const blocks: any[] = []
+                tasks.filter(t => taskProgress[t.id]?.trim()).forEach(t => {
+                  blocks.push({
+                    content: `[${taskStatuses[t.id]}] ${t.title}\n${taskProgress[t.id]}`,
+                    block_order: blockOrder++,
+                    section: 'today',
+                    visibility: 'advisor',
+                  })
+                })
+                if (memoContent.trim()) {
+                  blocks.push({
+                    content: memoContent,
+                    block_order: blockOrder++,
+                    section: 'misc',
+                    visibility: memoVisibility,
+                  })
+                }
+                if (log?.id && blocks.length > 0) {
+                  await api.daily.createBlocks(String(log.id), blocks)
+                }
+                setSaveMessage('최종 저장 완료')
+              } catch {
+                setSaveMessage('저장 실패 (서버 연결 확인)')
+              } finally {
+                setSaving(false)
+              }
+            }}
+            style={{
+              padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 600,
+              background: '#4f46e5', color: '#fff', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+              boxShadow: '0 2px 8px rgba(79,70,229,0.3)',
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
+            {saving ? '저장중...' : '최종 저장'}
           </button>
         </div>
       </div>

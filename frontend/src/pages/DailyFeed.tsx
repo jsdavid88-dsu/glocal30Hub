@@ -1,106 +1,7 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useRole } from '../contexts/RoleContext'
+import { api } from '../api/client'
 import MiniCalendar from '../components/MiniCalendar'
-
-const mockEntries = [
-  {
-    id: 1,
-    author: '한감성',
-    authorRole: 'student',
-    date: '2026-03-11',
-    project: 'KOCCA AI Animation Pipeline',
-    projectCode: 'KOCCA-2025-001',
-    visibility: '프로젝트 공개',
-    isAdvisee: true,
-    blocks: [
-      { section: '어제 한 일', content: 'Diffusion 모델 기반 캐릭터 생성 모듈 v2 학습 완료. FID 스코어 기존 대비 15% 개선 확인.', tags: ['AI/ML', 'Diffusion'] },
-      { section: '오늘 할 일', content: '생성된 캐릭터의 모션 리타겟팅 파이프라인 테스트. Blender 연동 스크립트 작성 예정.', tags: ['Animation', 'Pipeline'] },
-      { section: '이슈/논의', content: 'GPU 서버 메모리 부족 이슈 - A100 80GB에서도 batch size 4 이상 OOM 발생. 모델 경량화 검토 필요.', tags: ['인프라'] },
-    ],
-  },
-  {
-    id: 2,
-    author: '강데이',
-    authorRole: 'student',
-    date: '2026-03-11',
-    project: 'NRF GCA Narratology',
-    projectCode: 'NRF-2025-042',
-    visibility: '내부 공개',
-    isAdvisee: true,
-    blocks: [
-      { section: '어제 한 일', content: '서사 구조 분석 알고리즘 논문 초안 작성 완료. GCA 프레임워크 Section 3 초안 리뷰.', tags: ['논문', 'NLP'] },
-      { section: '오늘 할 일', content: '공동연구자 피드백 반영 및 실험 결과 시각화 작업. 한국서사학회 발표자료 준비.', tags: ['학회'] },
-    ],
-  },
-  {
-    id: 3,
-    author: '윤스마',
-    authorRole: 'student',
-    date: '2026-03-10',
-    project: 'Digital Heritage Archive',
-    projectCode: 'MOC-2025-017',
-    visibility: '프로젝트 공개',
-    isAdvisee: true,
-    blocks: [
-      { section: '어제 한 일', content: '경복궁 3D 스캔 데이터 정합 완료. 포인트 클라우드 → 메쉬 변환 파이프라인 최적화.', tags: ['3D', 'Heritage'] },
-      { section: '이슈/논의', content: '문화재청 데이터 활용 동의서 추가 서류 요청. 행정팀 협조 필요.', tags: ['행정'] },
-      { section: '기타', content: '중간보고서 마감 3/31. 현재 90% 진행률 - 최종 검토 일정 조율 중.', tags: ['보고서'] },
-    ],
-  },
-  {
-    id: 4,
-    author: '이학생',
-    authorRole: 'self',
-    date: '2026-03-10',
-    project: 'KOCCA AI Animation Pipeline',
-    projectCode: 'KOCCA-2025-001',
-    visibility: '내부 공개',
-    isAdvisee: false,
-    blocks: [
-      { section: '오늘 할 일', content: 'KOCCA 2차년도 중간평가 발표자료 준비. 데모 영상 편집 및 성과 지표 정리.', tags: ['평가', '발표'] },
-    ],
-  },
-  {
-    id: 5,
-    author: '정인턴',
-    authorRole: 'student',
-    date: '2026-03-11',
-    project: 'KOCCA AI Animation Pipeline',
-    projectCode: 'KOCCA-2025-001',
-    visibility: '프로젝트 공개',
-    isAdvisee: true,
-    blocks: [
-      { section: '어제 한 일', content: '캐릭터 리깅 자동화 스크립트 v3 테스트 완료. 관절 인식률 92% 달성.', tags: ['Animation', 'Rigging'] },
-      { section: '오늘 할 일', content: '리깅 결과물 Diffusion 모듈과 통합 테스트 진행 예정.', tags: ['Pipeline', 'Integration'] },
-    ],
-  },
-  {
-    id: 6,
-    author: '임연구',
-    authorRole: 'student',
-    date: '2026-03-11',
-    project: 'NRF GCA Narratology',
-    projectCode: 'NRF-2025-042',
-    visibility: '내부 공개',
-    isAdvisee: true,
-    blocks: [
-      { section: '어제 한 일', content: 'GCA 코퍼스 전처리 파이프라인 구축. 총 1,200편 서사 텍스트 토큰화 완료.', tags: ['NLP', 'Data'] },
-      { section: '이슈/논의', content: '저작권 이슈로 일부 텍스트 제외 필요. 법무팀 확인 중.', tags: ['법무'] },
-    ],
-  },
-  {
-    id: 7,
-    author: '송리서',
-    authorRole: 'student',
-    date: '2026-03-10',
-    visibility: '내부 공개',
-    isAdvisee: true,
-    blocks: [
-      { section: '오늘 할 일', content: '연구 주제 탐색: 생성형 AI 기반 인터랙티브 스토리텔링 관련 선행연구 서베이.', tags: ['서베이', 'AI'] },
-      { section: '기타', content: '다음 주 랩 세미나 발표 준비 시작.', tags: ['세미나'] },
-    ],
-  },
-]
 
 // External can only see project-scope blocks from assigned projects
 const externalAssignedProjects = ['KOCCA-2025-001', 'MOC-2025-017']
@@ -119,23 +20,6 @@ const cardStyle = {
   boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)',
 }
 
-// Mock marked dates for day-mode calendar
-const dailyMarkedDates: Record<string, 'submitted' | 'partial' | 'none'> = {
-  '2026-03-03': 'submitted',
-  '2026-03-04': 'submitted',
-  '2026-03-05': 'partial',
-  '2026-03-06': 'submitted',
-  '2026-03-07': 'submitted',
-  '2026-03-10': 'submitted',
-  '2026-03-11': 'submitted',
-  '2026-03-12': 'partial',
-  '2026-03-13': 'submitted',
-  '2026-03-17': 'partial',
-  '2026-03-18': 'submitted',
-  '2026-03-24': 'submitted',
-  '2026-03-25': 'submitted',
-  '2026-03-26': 'partial',
-}
 
 function formatDateLabel(d: Date): string {
   const y = d.getFullYear()
@@ -259,6 +143,91 @@ export default function DailyFeed() {
   const [filterProject, setFilterProject] = useState('')
   const [filterSection, setFilterSection] = useState('')
   const [feedView, setFeedView] = useState<'time' | 'project'>('time')
+  const [entries, setEntries] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [apiLoaded, setApiLoaded] = useState(false)
+  const [markedDates, setMarkedDates] = useState<Record<string, 'submitted' | 'partial' | 'none'>>({})
+
+  // Map API section enum values to Korean labels
+  const sectionLabelMap: Record<string, string> = {
+    yesterday: '어제 한 일',
+    today: '오늘 할 일',
+    issue: '이슈/논의',
+    misc: '기타',
+  }
+
+  // Map API visibility enum values to Korean labels
+  const visibilityLabelMap: Record<string, string> = {
+    private: '나만 보기',
+    advisor: '지도교수 공개',
+    internal: '내부 공개',
+    project: '프로젝트 공개',
+  }
+
+  // Fetch marked dates for the current month (for mini calendar)
+  useEffect(() => {
+    (async () => {
+      try {
+        const year = selectedDate.getFullYear()
+        const month = selectedDate.getMonth()
+        const firstDay = `${year}-${String(month + 1).padStart(2, '0')}-01`
+        const lastDate = new Date(year, month + 1, 0).getDate()
+        const lastDay = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDate).padStart(2, '0')}`
+        const monthLogs: any = await api.daily.list({ date_from: firstDay, date_to: lastDay, limit: '100' })
+        const items = Array.isArray(monthLogs) ? monthLogs : (monthLogs?.data || [])
+        const dateMap: Record<string, 'submitted' | 'partial' | 'none'> = {}
+        for (const log of items) {
+          const d = typeof log.date === 'string' ? log.date : ''
+          if (d) {
+            // Mark as submitted if log exists; could enhance with block count check
+            dateMap[d] = 'submitted'
+          }
+        }
+        setMarkedDates(dateMap)
+      } catch {
+        // Backend not available, leave empty
+      }
+    })()
+  }, [selectedDate.getFullYear(), selectedDate.getMonth()])
+
+  // Fetch entries for the selected date
+  useEffect(() => {
+    (async () => {
+      setLoading(true)
+      try {
+        const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
+        // Use date_from and date_to to filter for a specific day
+        const apiLogs: any = await api.daily.list({ date_from: dateStr, date_to: dateStr, limit: '50' })
+        const items = Array.isArray(apiLogs) ? apiLogs : (apiLogs?.data || [])
+        setApiLoaded(true)
+        setEntries(items.map((log: any, idx: number) => {
+          // Determine visibility label from the first block (or default)
+          const firstBlockVisibility = log.blocks?.[0]?.visibility || 'internal'
+          const visibilityLabel = visibilityLabelMap[firstBlockVisibility] || '내부 공개'
+          return {
+            id: log.id || idx + 1,
+            author: log.author?.name || log.author_name || '',
+            authorRole: log.author?.role || 'student',
+            date: typeof log.date === 'string' ? log.date : dateStr,
+            project: '',
+            projectCode: '',
+            visibility: visibilityLabel,
+            isAdvisee: true,
+            blocks: (log.blocks || []).map((b: any) => ({
+              section: sectionLabelMap[b.section] || b.section || '기타',
+              content: b.content || '',
+              tags: (b.tags || []).map((t: any) => t.tag?.name || t.name || ''),
+            })),
+          }
+        }))
+      } catch {
+        // Backend not available, show empty
+        setEntries([])
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [selectedDate])
 
   const toggleEntry = (id: number) => {
     setExpandedEntries((prev) => {
@@ -270,7 +239,7 @@ export default function DailyFeed() {
   }
 
   // Role-based entry filtering
-  const roleFilteredEntries = mockEntries.filter((entry) => {
+  const roleFilteredEntries = entries.filter((entry) => {
     if (currentRole === 'professor') {
       // Professor sees advisee dailies
       return true
@@ -334,7 +303,7 @@ export default function DailyFeed() {
   }
 
   // Render a single entry card
-  const renderEntryCard = (entry: typeof mockEntries[0], i: number) => {
+  const renderEntryCard = (entry: typeof entries[0], i: number) => {
     const expanded = expandedEntries.has(entry.id)
     const visibleBlocks = currentRole === 'external'
       ? entry.blocks.filter(b => b.section !== '기타')
@@ -491,8 +460,7 @@ export default function DailyFeed() {
           }}>
             <FilterSelect label="날짜" value={filterDate} onChange={setFilterDate} options={[
               { value: '', label: '전체' },
-              { value: '2026-03-11', label: '2026-03-11' },
-              { value: '2026-03-10', label: '2026-03-10' },
+              ...[...new Set(roleFilteredEntries.map(e => e.date))].sort().reverse().map(d => ({ value: d, label: d })),
             ]} />
             {currentRole === 'professor' && (
               <FilterSelect label="학생" value={filterAuthor} onChange={setFilterAuthor} options={[
@@ -514,13 +482,17 @@ export default function DailyFeed() {
           </div>
 
           {/* Feed Entries */}
-          {feedView === 'time' ? (
+          {loading ? (
+            <div style={{ textAlign: 'center' as const, padding: 60, color: '#94a3b8' }}>
+              <p style={{ fontSize: 15 }}>로딩 중...</p>
+            </div>
+          ) : feedView === 'time' ? (
             <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
               {filteredEntries.map((entry, i) => renderEntryCard(entry, i))}
 
               {filteredEntries.length === 0 && (
                 <div style={{ textAlign: 'center' as const, padding: 60, color: '#94a3b8' }}>
-                  <p style={{ fontSize: 15 }}>조건에 맞는 항목이 없습니다.</p>
+                  <p style={{ fontSize: 15 }}>{apiLoaded ? '아직 데일리가 없습니다.' : '조건에 맞는 항목이 없습니다.'}</p>
                 </div>
               )}
             </div>
@@ -528,7 +500,7 @@ export default function DailyFeed() {
             <div>
               {projectGroupedEntries.length === 0 && (
                 <div style={{ textAlign: 'center' as const, padding: 60, color: '#94a3b8' }}>
-                  <p style={{ fontSize: 15 }}>조건에 맞는 항목이 없습니다.</p>
+                  <p style={{ fontSize: 15 }}>{apiLoaded ? '아직 데일리가 없습니다.' : '조건에 맞는 항목이 없습니다.'}</p>
                 </div>
               )}
               {projectGroupedEntries.map((group) => (
@@ -552,7 +524,7 @@ export default function DailyFeed() {
             mode="day"
             selectedDate={selectedDate}
             onSelect={handleDaySelect}
-            markedDates={dailyMarkedDates}
+            markedDates={markedDates}
           />
         </div>
       </div>

@@ -127,3 +127,25 @@ async def logout():
     removing the stored token.
     """
     return {"message": "Logged out successfully. Please discard your token."}
+
+
+@router.post("/dev-login")
+async def dev_login(
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """DEV ONLY: login by email without OAuth. Only works when DEBUG=True."""
+    if not settings.DEBUG:
+        raise HTTPException(status_code=403, detail="Only available in DEBUG mode")
+
+    email = payload.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="email required")
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User with email {email} not found")
+
+    access_token = _create_access_token(user)
+    return {"access_token": access_token, "token_type": "bearer", "user": {"id": str(user.id), "email": user.email, "name": user.name, "role": user.role.value}}

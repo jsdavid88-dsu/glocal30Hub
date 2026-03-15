@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 
 export type Role = 'professor' | 'student' | 'external'
 
@@ -14,6 +14,20 @@ const RoleContext = createContext<RoleContextType>({
 
 export function RoleProvider({ children }: { children: ReactNode }) {
   const [currentRole, setRole] = useState<Role>('professor')
+
+  // Sync from token on mount
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]))
+        const role = payload.role as Role
+        if (['professor', 'student', 'external'].includes(role)) {
+          setRole(role)
+        }
+      } catch {}
+    }
+  }, [])
 
   return (
     <RoleContext.Provider value={{ currentRole, setRole }}>

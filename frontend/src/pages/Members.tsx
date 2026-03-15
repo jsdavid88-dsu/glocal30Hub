@@ -1,19 +1,28 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRole } from '../contexts/RoleContext'
+import { api } from '../api/client'
 
-const allMembers = [
-  { name: '김연구', email: 'kim@university.ac.kr', role: 'PI (연구책임자)', department: '디지털콘텐츠학과', projects: ['KOCCA-2025-001'], status: '재직', color: '#4f46e5', isAdvisee: false, isProjectTeam: true, sharedProject: true },
-  { name: '이서사', email: 'lee@university.ac.kr', role: '공동연구원', department: '디지털콘텐츠학과', projects: ['NRF-2025-042'], status: '재직', color: '#059669', isAdvisee: false, isProjectTeam: true, sharedProject: false },
-  { name: '박디지', email: 'park@university.ac.kr', role: '공동연구원', department: '문화유산학과', projects: ['MOC-2025-017'], status: '재직', color: '#d97706', isAdvisee: false, isProjectTeam: true, sharedProject: true },
-  { name: '최이머', email: 'choi@university.ac.kr', role: '연구교수', department: '컴퓨터공학과', projects: ['IITP-2026-003'], status: '재직', color: '#e11d48', isAdvisee: false, isProjectTeam: false, sharedProject: false },
-  { name: '한감성', email: 'han@university.ac.kr', role: '박사과정', department: '디지털콘텐츠학과', projects: ['NRF-2026-088', 'KOCCA-2025-001'], status: '재학', color: '#0284c7', isAdvisee: true, isProjectTeam: true, sharedProject: true },
-  { name: '윤스마', email: 'yoon@university.ac.kr', role: '석사과정', department: '컴퓨터공학과', projects: ['MSIT-2025-055'], status: '재학', color: '#7c3aed', isAdvisee: true, isProjectTeam: true, sharedProject: false },
-  { name: '정인턴', email: 'jung@university.ac.kr', role: '학부 인턴', department: '디지털콘텐츠학과', projects: ['KOCCA-2025-001'], status: '재학', color: '#64748b', isAdvisee: true, isProjectTeam: true, sharedProject: true },
-  { name: '강데이', email: 'kang@university.ac.kr', role: '연구원', department: '디지털콘텐츠학과', projects: ['NRF-2025-042', 'MOC-2025-017'], status: '재직', color: '#059669', isAdvisee: true, isProjectTeam: true, sharedProject: true },
-]
+// Map API user role to display role string
+const roleDisplayMap: Record<string, string> = {
+  professor: '교수',
+  student: '학생',
+  external: '외부 파트너',
+}
 
-const roleOptions = ['전체', 'PI (연구책임자)', '공동연구원', '연구교수', '박사과정', '석사과정', '학부 인턴', '연구원']
-const projectOptions = ['전체', 'KOCCA-2025-001', 'NRF-2025-042', 'MOC-2025-017', 'IITP-2026-003', 'NRF-2026-088', 'MSIT-2025-055']
+// Avatar color palette (cycle by index)
+const avatarColors = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#0284c7', '#7c3aed', '#64748b', '#b45309']
+
+type MemberRow = {
+  id: string
+  name: string
+  email: string
+  role: string          // display role string
+  apiRole: string       // raw API role (professor|student|external)
+  department: string
+  status: string
+  color: string
+  projects: string[]
+}
 
 const cardStyle = {
   background: '#ffffff',
@@ -26,28 +35,54 @@ export default function Members() {
   const { currentRole } = useRole()
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('전체')
-  const [projectFilter, setProjectFilter] = useState('전체')
+  const [allMembers, setAllMembers] = useState<MemberRow[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.users.list()
+      .then((res: any) => {
+        // Response shape: { data: UserSummaryResponse[], meta: dict }
+        const items: any[] = res?.data || []
+        const mapped: MemberRow[] = items.map((u: any, idx: number) => ({
+          id: u.id || '',
+          name: u.name || '',
+          email: u.email || '',
+          role: roleDisplayMap[u.role] || u.role || '',
+          apiRole: u.role || '',
+          department: u.major_field || '',
+          status: u.status === 'active' ? '재직' : u.status || '',
+          color: avatarColors[idx % avatarColors.length],
+          projects: [],  // project membership not in UserSummaryResponse
+        }))
+        setAllMembers(mapped)
+      })
+      .catch(() => setAllMembers([]))
+      .finally(() => setLoading(false))
+  }, [])
 
   // Role-based member visibility
   const visibleMembers = allMembers.filter((m) => {
-    if (currentRole === 'professor') return true // sees all, especially advisees with detail
-    if (currentRole === 'student') return m.isProjectTeam // sees project team members
-    if (currentRole === 'external') return m.sharedProject // sees only members from shared projects
+    if (currentRole === 'professor') return true
+    if (currentRole === 'student') return m.apiRole === 'student' || m.apiRole === 'professor'
+    if (currentRole === 'external') return m.apiRole !== 'external'
     return true
   })
+
+  const roleOptions = ['전체', ...Array.from(new Set(allMembers.map(m => m.role))).filter(Boolean)]
 
   const filtered = visibleMembers.filter((m) => {
     if (search && !m.name.includes(search) && !m.email.includes(search)) return false
     if (roleFilter !== '전체' && m.role !== roleFilter) return false
-    if (projectFilter !== '전체' && !m.projects.includes(projectFilter)) return false
     return true
   })
 
   const roleDescriptions: Record<string, string> = {
-    professor: `${allMembers.length}명의 연구 구성원 (지도학생 ${allMembers.filter(m => m.isAdvisee).length}명)`,
-    student: `${visibleMembers.length}명의 프로젝트 팀원`,
-    external: `${visibleMembers.length}명의 공유 프로젝트 구성원`,
+    professor: `${allMembers.length}명의 연구 구성원`,
+    student: `${visibleMembers.length}명의 팀원`,
+    external: `${visibleMembers.length}명의 구성원`,
   }
+
+  if (loading) return <div style={{ padding: '48px', color: '#94a3b8', textAlign: 'center' }}>로딩 중...</div>
 
   return (
     <div key={currentRole} style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -92,15 +127,6 @@ export default function Members() {
             {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
-        <div style={{ minWidth: 160 }}>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 500, color: '#94a3b8', marginBottom: 4 }}>과제</label>
-          <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} style={{
-            width: '100%', padding: '6px 10px', borderRadius: 8,
-            border: '1px solid #e2e8f0', fontSize: 12, color: '#0f172a', background: '#fff', outline: 'none', cursor: 'pointer',
-          }}>
-            {projectOptions.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </div>
       </div>
 
       {/* Member Cards Grid */}
@@ -139,12 +165,12 @@ export default function Members() {
                   }}>
                     {member.status}
                   </span>
-                  {currentRole === 'professor' && member.isAdvisee && (
+                  {currentRole === 'professor' && member.apiRole === 'student' && (
                     <span style={{
                       padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 600,
                       background: '#fef3c7', color: '#b45309',
                     }}>
-                      지도학생
+                      학생
                     </span>
                   )}
                 </div>

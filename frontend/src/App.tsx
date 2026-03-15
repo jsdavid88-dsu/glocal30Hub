@@ -1,8 +1,10 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { RoleProvider } from './contexts/RoleContext'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
+import AuthCallback from './pages/AuthCallback'
 import Projects from './pages/Projects'
 import Profile from './pages/Profile'
 import DailyWrite from './pages/DailyWrite'
@@ -12,26 +14,36 @@ import Calendar from './pages/Calendar'
 import Attendance from './pages/Attendance'
 import Weekly from './pages/Weekly'
 
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { token, loading } = useAuth()
+  if (loading) return <div className="flex items-center justify-center h-screen"><p className="text-gray-400">로딩 중...</p></div>
+  if (!token) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
 function App() {
   return (
-    <RoleProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/projects" element={<Projects />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/daily/write" element={<DailyWrite />} />
-            <Route path="/daily/feed" element={<DailyFeed />} />
-            <Route path="/members" element={<Members />} />
-            <Route path="/calendar" element={<Calendar />} />
-            <Route path="/attendance" element={<Attendance />} />
-            <Route path="/weekly" element={<Weekly />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </RoleProvider>
+    <AuthProvider>
+      <RoleProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/projects" element={<Projects />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/daily/write" element={<DailyWrite />} />
+              <Route path="/daily/feed" element={<DailyFeed />} />
+              <Route path="/members" element={<Members />} />
+              <Route path="/calendar" element={<Calendar />} />
+              <Route path="/attendance" element={<Attendance />} />
+              <Route path="/weekly" element={<Weekly />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </RoleProvider>
+    </AuthProvider>
   )
 }
 

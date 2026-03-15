@@ -1,4 +1,25 @@
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import type { UserInfo } from '../contexts/AuthContext'
+
 export default function Login() {
+  const { token, devLogin } = useAuth()
+  const navigate = useNavigate()
+  const [devRole, setDevRole] = useState<UserInfo['role']>('professor')
+
+  useEffect(() => {
+    if (token) navigate('/', { replace: true })
+  }, [token, navigate])
+
+  const handleDevLogin = async () => {
+    await devLogin(devRole)
+  }
+
+  const handleGoogleLogin = () => {
+    window.location.href = 'http://localhost:8000/api/v1/auth/login'
+  }
+
   return (
     <div className="min-h-screen flex font-body">
       {/* Left side — branding */}
@@ -57,7 +78,7 @@ export default function Login() {
 
           {/* Google Sign In */}
           <button
-            onClick={() => (window.location.href = '/api/v1/auth/login')}
+            onClick={handleGoogleLogin}
             className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-card border border-border rounded-xl text-[14px] font-medium text-text-primary hover:bg-card-hover hover:border-border/80 hover:shadow-sm transition-all duration-200"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -78,34 +99,31 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Email form */}
+          {/* Dev login */}
           <div className="space-y-4">
             <div>
-              <label className="block text-[13px] font-medium text-text-secondary mb-1.5">Email</label>
-              <input
-                type="email"
-                placeholder="name@university.ac.kr"
-                className="w-full px-4 py-2.5 bg-card border border-border rounded-xl text-[14px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent/40 transition-all"
-              />
+              <label className="block text-[13px] font-medium text-text-secondary mb-1.5">역할 선택 (개발용)</label>
+              <select
+                value={devRole}
+                onChange={(e) => setDevRole(e.target.value as UserInfo['role'])}
+                className="w-full px-4 py-2.5 bg-card border border-border rounded-xl text-[14px] text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent/40 transition-all"
+              >
+                <option value="professor">교수 (Professor)</option>
+                <option value="student">학생 (Student)</option>
+                <option value="external">외부업체 (External)</option>
+              </select>
             </div>
-            <div>
-              <label className="block text-[13px] font-medium text-text-secondary mb-1.5">Password</label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                className="w-full px-4 py-2.5 bg-card border border-border rounded-xl text-[14px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent/40 transition-all"
-              />
-            </div>
-            <button className="w-full py-2.5 bg-accent text-white text-[14px] font-semibold rounded-xl hover:bg-accent-dark transition-colors shadow-sm">
-              Sign In
+            <button
+              onClick={handleDevLogin}
+              className="w-full py-2.5 bg-accent text-white text-[14px] font-semibold rounded-xl hover:bg-accent-dark transition-colors shadow-sm"
+            >
+              Dev Sign In
             </button>
           </div>
 
           <p className="text-center text-[12px] text-text-muted mt-6">
-            Don't have an account?{' '}
-            <a href="#" className="text-accent hover:text-accent-dark font-medium transition-colors">
-              Request access
-            </a>
+            <span className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-[11px] font-medium">DEV MODE</span>
+            {' '}배포 시 제거됩니다
           </p>
         </div>
       </div>

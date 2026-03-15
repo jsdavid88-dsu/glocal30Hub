@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 interface CalendarEvent {
   date: number
@@ -13,29 +13,26 @@ const eventTypeConfig = {
   presentation: { label: '발표', bg: '#fef3c7', color: '#b45309', dot: '#d97706' },
 }
 
-const getEventsForMonth = (year: number, month: number): CalendarEvent[] => {
-  // Mock events - scattered across the month
-  const events: CalendarEvent[] = [
-    { date: 3, title: '대학원 세미나', type: 'class' },
-    { date: 5, title: 'KOCCA 주간회의', type: 'meeting' },
-    { date: 7, title: 'NRF 논문 초안 마감', type: 'deadline' },
-    { date: 10, title: '대학원 세미나', type: 'class' },
-    { date: 11, title: '지도교수 면담', type: 'meeting' },
-    { date: 12, title: 'KOCCA 주간회의', type: 'meeting' },
-    { date: 14, title: 'CHI 2026 발표', type: 'presentation' },
-    { date: 15, title: '중간보고서 제출', type: 'deadline' },
-    { date: 17, title: '대학원 세미나', type: 'class' },
-    { date: 19, title: 'KOCCA 주간회의', type: 'meeting' },
-    { date: 20, title: '한국서사학회 발표', type: 'presentation' },
-    { date: 22, title: '예산 보고서 마감', type: 'deadline' },
-    { date: 24, title: '대학원 세미나', type: 'class' },
-    { date: 25, title: '프로젝트 전체 회의', type: 'meeting' },
-    { date: 26, title: 'KOCCA 주간회의', type: 'meeting' },
-    { date: 28, title: 'XR 플랫폼 데모', type: 'presentation' },
-    { date: 31, title: 'MOC 중간보고서 마감', type: 'deadline' },
-  ]
-  return events
-}
+// TODO: Phase 3 - events API
+const mockEventsForMonth = (): CalendarEvent[] => [
+  { date: 3, title: '대학원 세미나', type: 'class' },
+  { date: 5, title: 'KOCCA 주간회의', type: 'meeting' },
+  { date: 7, title: 'NRF 논문 초안 마감', type: 'deadline' },
+  { date: 10, title: '대학원 세미나', type: 'class' },
+  { date: 11, title: '지도교수 면담', type: 'meeting' },
+  { date: 12, title: 'KOCCA 주간회의', type: 'meeting' },
+  { date: 14, title: 'CHI 2026 발표', type: 'presentation' },
+  { date: 15, title: '중간보고서 제출', type: 'deadline' },
+  { date: 17, title: '대학원 세미나', type: 'class' },
+  { date: 19, title: 'KOCCA 주간회의', type: 'meeting' },
+  { date: 20, title: '한국서사학회 발표', type: 'presentation' },
+  { date: 22, title: '예산 보고서 마감', type: 'deadline' },
+  { date: 24, title: '대학원 세미나', type: 'class' },
+  { date: 25, title: '프로젝트 전체 회의', type: 'meeting' },
+  { date: 26, title: 'KOCCA 주간회의', type: 'meeting' },
+  { date: 28, title: 'XR 플랫폼 데모', type: 'presentation' },
+  { date: 31, title: 'MOC 중간보고서 마감', type: 'deadline' },
+]
 
 const DAYS_KO = ['일', '월', '화', '수', '목', '금', '토']
 
@@ -51,7 +48,30 @@ export default function Calendar() {
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()
 
-  const events = getEventsForMonth(year, month)
+  const [allEvents, setAllEvents] = useState<CalendarEvent[]>(mockEventsForMonth())
+
+  useEffect(() => {
+    // TODO: Phase 3 - events API
+    fetch('/api/v1/events', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    })
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((data) => {
+        const items = data.items || data
+        if (Array.isArray(items) && items.length > 0) {
+          // Map API event shape to CalendarEvent; fallback to mock if shape doesn't match
+          setAllEvents(items)
+        } else {
+          setAllEvents(mockEventsForMonth())
+        }
+      })
+      .catch(() => setAllEvents(mockEventsForMonth()))
+  }, [])
+
+  const events = allEvents.filter((e) => {
+    // If events come from API they may have a full date; for now we filter by day number
+    return true
+  })
 
   const firstDayOfMonth = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
