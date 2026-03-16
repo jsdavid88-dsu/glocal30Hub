@@ -108,7 +108,8 @@ export const api = {
         return r.json();
       });
     },
-    getUrl: (fileId: string) => `${API_BASE}/uploads/${fileId}`,
+    // Use the `url` field from upload response directly when possible
+    getUrl: (filename: string) => `${API_BASE}/uploads/${filename}`,
   },
   // Weekly
   weekly: {
@@ -122,6 +123,10 @@ export const api = {
     list: (params?: Record<string, string>) => request(`/events/?${new URLSearchParams(params)}`),
     get: (id: string) => request(`/events/${id}`),
     create: (data: any) => request('/events/', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: any) =>
+      request(`/events/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request(`/events/${id}`, { method: 'DELETE' }),
   },
   // Attendance
   attendance: {

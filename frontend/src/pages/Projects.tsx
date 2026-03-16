@@ -70,6 +70,9 @@ export default function Projects() {
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [detailData, setDetailData] = useState<Record<string, { members: ProjectMember[]; tasks: TaskItem[]; loading: boolean }>>({})
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createForm, setCreateForm] = useState({ name: '', description: '', start_date: '', end_date: '' })
+  const [creating, setCreating] = useState(false)
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -219,6 +222,7 @@ export default function Projects() {
         </div>
         {(currentRole === 'professor') && (
           <button
+            onClick={() => setShowCreateModal(true)}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 8,
               padding: '10px 20px', borderRadius: 12,
@@ -576,6 +580,76 @@ export default function Projects() {
           }
         }
       `}</style>
+
+      {/* Create Project Modal */}
+      {showCreateModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowCreateModal(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 32, width: 480, maxWidth: '90vw', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', marginBottom: 24 }}>새 프로젝트 생성</h3>
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#475569', marginBottom: 6 }}>프로젝트명 *</label>
+                <input
+                  value={createForm.name} onChange={(e) => setCreateForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="예: AI 애니메이션 파이프라인"
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#475569', marginBottom: 6 }}>설명</label>
+                <textarea
+                  value={createForm.description} onChange={(e) => setCreateForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="프로젝트에 대한 간단한 설명"
+                  rows={3}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, outline: 'none', resize: 'vertical' as const, boxSizing: 'border-box' as const }}
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#475569', marginBottom: 6 }}>시작일</label>
+                  <input type="date" value={createForm.start_date} onChange={(e) => setCreateForm(f => ({ ...f, start_date: e.target.value }))}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#475569', marginBottom: 6 }}>종료일</label>
+                  <input type="date" value={createForm.end_date} onChange={(e) => setCreateForm(f => ({ ...f, end_date: e.target.value }))}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }} />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 28 }}>
+              <button onClick={() => { setShowCreateModal(false); setCreateForm({ name: '', description: '', start_date: '', end_date: '' }) }}
+                style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 14, fontWeight: 500, cursor: 'pointer', color: '#64748b' }}>
+                취소
+              </button>
+              <button
+                disabled={!createForm.name.trim() || creating}
+                onClick={async () => {
+                  setCreating(true)
+                  try {
+                    const body: any = { name: createForm.name.trim(), description: createForm.description || undefined }
+                    if (createForm.start_date) body.start_date = createForm.start_date
+                    if (createForm.end_date) body.end_date = createForm.end_date
+                    await api.projects.create(body)
+                    setShowCreateModal(false)
+                    setCreateForm({ name: '', description: '', start_date: '', end_date: '' })
+                    fetchProjects()
+                  } catch (err) {
+                    alert('프로젝트 생성에 실패했습니다.')
+                  } finally {
+                    setCreating(false)
+                  }
+                }}
+                style={{
+                  padding: '10px 24px', borderRadius: 8, border: 'none', fontSize: 14, fontWeight: 600, cursor: createForm.name.trim() && !creating ? 'pointer' : 'not-allowed',
+                  background: createForm.name.trim() && !creating ? '#4f46e5' : '#c7d2fe', color: '#fff', transition: 'all 0.15s',
+                }}>
+                {creating ? '생성 중...' : '생성'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

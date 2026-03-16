@@ -17,7 +17,7 @@ export default function Login() {
   }
 
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:8000/api/v1/auth/login'
+    window.location.href = '/api/v1/auth/login'
   }
 
   return (

@@ -301,6 +301,7 @@ export default function DailyWrite() {
   const [tasks, setTasks] = useState<AssignedTask[]>(defaultMockTasks)
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
+  const [existingLogId, setExistingLogId] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [draftIndicator, setDraftIndicator] = useState<string | null>(null)
   const [showDraftRestore, setShowDraftRestore] = useState(false)
@@ -337,6 +338,22 @@ export default function DailyWrite() {
   const [memoFiles, setMemoFiles] = useState<UploadedFile[]>([])
   const [uploadingFor, setUploadingFor] = useState<string | null>(null)
 
+  // ── Check for existing daily log for today ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const todayISO = new Date().toISOString().split('T')[0]
+        const res: any = await api.daily.list({ date_from: todayISO, date_to: todayISO })
+        const items = Array.isArray(res) ? res : (res?.data || [])
+        if (items.length > 0 && items[0].id) {
+          setExistingLogId(String(items[0].id))
+        }
+      } catch {
+        // Backend not available
+      }
+    })()
+  }, [])
+
   // ── Fetch projects ──
   useEffect(() => {
     (async () => {
@@ -360,15 +377,14 @@ export default function DailyWrite() {
       try {
         const apiTasks: any = await api.tasks.my()
         const items = Array.isArray(apiTasks) ? apiTasks : (apiTasks?.data || [])
-        if (items.length > 0) {
-          const statusMap: Record<string, TaskStatus> = {
+        const statusMap: Record<string, TaskStatus> = {
             in_progress: '진행중', review: '진행중', '진행중': '진행중',
             todo: '새로', new: '새로', not_started: '새로', '새로': '새로', '미시작': '새로',
             done: '완료', completed: '완료', '완료': '완료',
             blocked: '블로킹', '블로킹': '블로킹',
           }
           const mapped: AssignedTask[] = items.map((t: any) => ({
-            id: t.id || Math.random(),
+            id: t.id || crypto.randomUUID(),
             title: t.title || '',
             status: statusMap[t.status] || '새로',
             url: t.url || t.reference_url || undefined,
@@ -376,7 +392,6 @@ export default function DailyWrite() {
             project_id: t.project_id || undefined,
           }))
           setTasks(mapped)
-        }
       } catch {
         // Backend not available, keep mock data
       }
@@ -584,7 +599,16 @@ export default function DailyWrite() {
         .filter(t => taskProgress[t.id]?.trim())
         .map(t => `[${taskStatuses[t.id]}] ${t.title}: ${taskProgress[t.id]}`)
       const rawContent = [...taskLines, memoContent.trim()].filter(Boolean).join('\n\n')
-      const log: any = await api.daily.create({ date: todayISO, raw_content: rawContent })
+      let log: any
+      if (existingLogId) {
+        log = await api.daily.update(existingLogId, { date: todayISO, raw_content: rawContent })
+        // Keep the id if update doesn't return it
+        if (!log?.id) log = { id: existingLogId }
+      } else {
+        log = await api.daily.create({ date: todayISO, raw_content: rawContent })
+        // Store the new log ID so subsequent saves use update
+        if (log?.id) setExistingLogId(String(log.id))
+      }
 
       // Resolve tag names to IDs (create if needed)
       const tagIds: number[] = []

@@ -85,15 +85,23 @@ export default function Profile() {
         }
       }
 
-      // Fetch advisees for professors
+      // Fetch advisees for professors via advisors API
       if (user.role === 'professor') {
         try {
-          const allUsers: any = await api.users.list()
-          const userList = Array.isArray(allUsers) ? allUsers : (allUsers.items || allUsers.data || [])
-          const myAdvisees = userList.filter((u: any) => u.advisor_id === user.id)
-          setAdvisees(myAdvisees)
+          const token = localStorage.getItem('token')
+          const res = await fetch(`/api/v1/users/${user.id}/advisees`, {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          })
+          if (res.ok) {
+            const data = await res.json()
+            const adviseeList = Array.isArray(data) ? data : (data.items || data.data || [])
+            setAdvisees(adviseeList)
+          }
         } catch {
-          // ignore
+          // advisees endpoint not available
         }
       }
 
@@ -124,7 +132,7 @@ export default function Profile() {
       })
       setEditing(false)
     } catch {
-      // ignore error silently
+      alert('저장에 실패했습니다.')
     } finally {
       setSaving(false)
     }

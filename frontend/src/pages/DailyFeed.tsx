@@ -3,8 +3,7 @@ import { useRole } from '../contexts/RoleContext'
 import { api } from '../api/client'
 import MiniCalendar from '../components/MiniCalendar'
 
-// External can only see project-scope blocks from assigned projects
-const externalAssignedProjects = ['KOCCA-2025-001', 'MOC-2025-017']
+// External assigned projects — populated dynamically from API
 
 const sectionColors: Record<string, { bg: string; color: string }> = {
   '어제 한 일': { bg: '#e0e7ff', color: '#4338ca' },
@@ -833,6 +832,7 @@ export default function DailyFeed() {
   const [apiLoaded, setApiLoaded] = useState(false)
   const [markedDates, setMarkedDates] = useState<Record<string, 'submitted' | 'partial' | 'none'>>({})
   const [projectMap, setProjectMap] = useState<Record<number, { name: string; code: string }>>({})
+  const [externalAssignedProjects, setExternalAssignedProjects] = useState<string[]>([])
 
   // Map API section enum values to Korean labels
   const sectionLabelMap: Record<string, string> = {
@@ -852,19 +852,22 @@ export default function DailyFeed() {
     project: '프로젝트 공개',
   }
 
-  // Fetch projects for metadata lookup
+  // Fetch projects for metadata lookup + external assigned projects
   useEffect(() => {
     (async () => {
       try {
         const res: any = await api.projects.list()
         const items = Array.isArray(res) ? res : (res?.data || [])
         const map: Record<number, { name: string; code: string }> = {}
+        const codes: string[] = []
         for (const p of items) {
           if (p.id) {
             map[p.id] = { name: p.name || p.title || '', code: p.code || '' }
+            if (p.code) codes.push(p.code)
           }
         }
         setProjectMap(map)
+        setExternalAssignedProjects(codes)
       } catch {
         // Backend not available
       }

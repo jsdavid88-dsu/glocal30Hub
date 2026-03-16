@@ -139,6 +139,7 @@ const allNavItems = [
       { path: '/members', label: 'Students', icon: TeamIcon, roles: ['professor'] as Role[] },
       { path: '/calendar', label: 'Calendar', icon: CalendarIcon, roles: ['professor', 'student', 'external'] as Role[] },
       { path: '/attendance', label: 'Attendance', icon: AttendanceIcon, roles: ['student'] as Role[] },
+      { path: '/profile', label: 'Profile', icon: ProfileIcon, roles: ['professor', 'student', 'external'] as Role[] },
       { path: '/admin', label: 'Admin', icon: AdminIcon, roles: ['professor'] as Role[] },
     ],
   },
@@ -184,7 +185,7 @@ export default function Layout() {
   const rb = roleBadgeColors[currentRole]
 
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: 'red' }}>
+    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: '#f8fafc' }}>
       {/* Mobile overlay */}
       {!isDesktop && mobileOpen && (
         <div
@@ -271,14 +272,6 @@ export default function Layout() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {isDesktop && (
-              <div style={{ position: 'relative' }}>
-                <SearchIcon />
-                <input type="text" placeholder="Search..." style={{ paddingLeft: 36, paddingRight: 48, paddingTop: 6, paddingBottom: 6, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, color: '#475569', width: 220, outline: 'none' }} />
-                <kbd style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: '#94a3b8', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, padding: '2px 6px', fontFamily: 'monospace' }}>⌘K</kbd>
-              </div>
-            )}
-
             {/* DEV Role Switcher */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6,
@@ -515,9 +508,6 @@ function TeamIcon({ active }: { active: boolean }) {
 }
 function CalendarIcon({ active }: { active: boolean }) {
   return <svg style={{ width: 18, height: 18, color: active ? '#4f46e5' : undefined }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-}
-function SearchIcon() {
-  return <svg style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: '#94a3b8' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
 }
 function BellIcon() {
   return <svg style={{ width: 18, height: 18 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>

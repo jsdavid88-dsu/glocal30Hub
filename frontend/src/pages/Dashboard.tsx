@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useRole, type Role } from '../contexts/RoleContext'
+import { useAuth } from '../contexts/AuthContext'
 import { api } from '../api/client'
 
 // ─── Types ───
@@ -49,11 +51,11 @@ const hoverRow = {
   onMouseLeave: (e: React.MouseEvent<HTMLDivElement>) => { e.currentTarget.style.background = 'transparent' },
 }
 
-// ─── Greeting map ───
-const greetingMap: Record<Role, { name: string; subtitle: string }> = {
-  professor: { name: '김교수님', subtitle: '지도학생 현황과 연구실 활동을 확인하세요.' },
-  student: { name: '이학생님', subtitle: '오늘의 태스크와 일정을 확인하세요.' },
-  external: { name: '파트너님', subtitle: '참여 프로젝트 현황을 확인하세요.' },
+// ─── Greeting subtitle map ───
+const greetingSubtitleMap: Record<Role, string> = {
+  professor: '지도학생 현황과 연구실 활동을 확인하세요.',
+  student: '오늘의 태스크와 일정을 확인하세요.',
+  external: '참여 프로젝트 현황을 확인하세요.',
 }
 
 // ─── Status helpers ───
@@ -98,17 +100,18 @@ function daysUntil(dateStr: string): number {
 // ─── Main Component ───
 export default function Dashboard() {
   const { currentRole } = useRole()
-  const greeting = greetingMap[currentRole]
+  const { user } = useAuth()
+  const userName = user?.name || '사용자'
 
   return (
     <div key={currentRole} style={{ width: '100%' }}>
       {/* Greeting */}
       <div style={{ marginBottom: '32px' }} className="animate-fade-in">
         <h1 style={{ fontSize: '26px', fontWeight: 600, color: 'var(--color-text-primary)', fontFamily: 'var(--font-display)' }}>
-          안녕하세요, {greeting.name}
+          안녕하세요, {userName}님
         </h1>
         <p style={{ color: 'var(--color-text-muted)', fontSize: '15px', marginTop: '6px', lineHeight: 1.5 }}>
-          {greeting.subtitle}
+          {greetingSubtitleMap[currentRole]}
         </p>
       </div>
 
@@ -152,6 +155,7 @@ export default function Dashboard() {
 // ─── Professor View ───
 // ════════════════════════════════════════
 function ProfessorView() {
+  const navigate = useNavigate()
   const [students, setStudents] = useState<StudentRow[]>([])
   const [taskSummary, setTaskSummary] = useState({ done: 0, inProgress: 0, notStarted: 0 })
   const [issues, setIssues] = useState<IssueItem[]>([])
@@ -318,10 +322,13 @@ function ProfessorView() {
                 <h3 style={sectionTitleStyle}>내 학생들</h3>
                 <p style={sectionSubtitleStyle}>지도학생 + 프로젝트 학생 통합 ({students.length}명)</p>
               </div>
-              <button style={{
-                fontSize: 14, fontWeight: 500, color: 'var(--color-accent)', background: 'none',
-                border: 'none', cursor: 'pointer', padding: '6px 12px', borderRadius: 8,
-              }}>
+              <button
+                onClick={() => navigate('/members')}
+                style={{
+                  fontSize: 14, fontWeight: 500, color: 'var(--color-accent)', background: 'none',
+                  border: 'none', cursor: 'pointer', padding: '6px 12px', borderRadius: 8,
+                }}
+              >
                 전체 보기
               </button>
             </div>
@@ -669,7 +676,7 @@ function StudentView() {
               {dailyWritten ? '오늘 데일리 제출 완료' : '오늘 아직 미작성'}
             </p>
           </div>
-          <a href="/daily/write" style={{
+          <Link to="/daily/write" style={{
             padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
             border: 'none', cursor: 'pointer', textDecoration: 'none',
             background: dailyWritten ? '#f1f5f9' : 'var(--color-accent)',
@@ -677,7 +684,7 @@ function StudentView() {
             boxShadow: dailyWritten ? 'none' : '0 2px 8px rgba(79,70,229,0.3)',
           }}>
             {dailyWritten ? '수정하기' : '작성하기'}
-          </a>
+          </Link>
         </div>
 
         {/* Weekly progress */}
@@ -842,14 +849,29 @@ function StudentView() {
 // ════════════════════════════════════════
 function ExternalView() {
   const [projects, setProjects] = useState<any[]>([])
+  const [projectTasks, setProjectTasks] = useState<Record<string, any[]>>({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     api.projects.list()
-      .then((res: any) => {
-        // Response shape: { data: ProjectSummaryResponse[], meta: dict }
+      .then(async (res: any) => {
         const items: any[] = res?.data || []
         setProjects(items)
+
+        // Fetch tasks for each project
+        const tasksByProject: Record<string, any[]> = {}
+        await Promise.all(
+          items.map(async (project: any) => {
+            if (!project.id) return
+            try {
+              const taskRes = await api.tasks.listByProject(project.id) as any
+              tasksByProject[project.id] = taskRes?.data || []
+            } catch {
+              tasksByProject[project.id] = []
+            }
+          })
+        )
+        setProjectTasks(tasksByProject)
       })
       .catch(() => setProjects([]))
       .finally(() => setLoading(false))
@@ -906,11 +928,61 @@ function ExternalView() {
               )}
             </div>
 
-            {/* Issues section */}
-            <div style={{ padding: '12px 28px 20px', borderTop: '1px solid #f1f5f9' }}>
-              <p style={{ fontSize: 13, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
-                이슈 및 태스크 정보는 준비 중입니다.
-              </p>
+            {/* Tasks section */}
+            <div style={{ padding: '16px 28px 20px', borderTop: '1px solid #f1f5f9' }}>
+              {(() => {
+                const tasks = projectTasks[project.id] || []
+                if (tasks.length === 0) {
+                  return (
+                    <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+                      등록된 태스크가 없습니다.
+                    </p>
+                  )
+                }
+                const done = tasks.filter((t: any) => t.status === 'done' || t.status === 'completed').length
+                const inProgress = tasks.filter((t: any) => t.status === 'in_progress').length
+                const notStarted = tasks.length - done - inProgress
+                return (
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+                      태스크 현황 ({tasks.length}건)
+                    </p>
+                    <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+                      <span style={badgeStyle('var(--color-success-light)', 'var(--color-success)')}>완료 {done}</span>
+                      <span style={badgeStyle('var(--color-accent-light)', 'var(--color-accent)')}>진행중 {inProgress}</span>
+                      <span style={badgeStyle('#f1f5f9', 'var(--color-text-muted)')}>미시작 {notStarted}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {tasks.slice(0, 5).map((t: any, ti: number) => {
+                        const statusMap: Record<string, string> = {
+                          done: '완료', completed: '완료', in_progress: '진행중', not_started: '미시작', new: '미시작',
+                        }
+                        const status = statusMap[t.status] || '미시작'
+                        return (
+                          <div key={t.id || ti} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '8px 12px', borderRadius: 8, background: '#f8fafc',
+                          }}>
+                            <span style={{
+                              fontSize: 13, color: 'var(--color-text-primary)',
+                              textDecoration: status === '완료' ? 'line-through' : 'none',
+                              opacity: status === '완료' ? 0.6 : 1,
+                            }}>
+                              {t.title}
+                            </span>
+                            <span style={taskStatusBadge(status as '완료' | '진행중' | '미시작')}>{status}</span>
+                          </div>
+                        )
+                      })}
+                      {tasks.length > 5 && (
+                        <p style={{ fontSize: 12, color: 'var(--color-text-muted)', textAlign: 'center', marginTop: 4 }}>
+                          외 {tasks.length - 5}건 더...
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           </div>
         </div>
