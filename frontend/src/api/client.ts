@@ -57,6 +57,20 @@ export const api = {
       request('/tasks/carryover', { method: 'POST', body: JSON.stringify({ task_ids: taskIds, new_due_date: newDueDate }) }),
     summaryByStudent: (weekStart: string) => request(`/tasks/summary-by-student?week_start=${weekStart}`),
   },
+  // Task Groups
+  groups: {
+    list: (projectId: string) => request(`/projects/${projectId}/groups`),
+    create: (projectId: string, data: any) =>
+      request(`/projects/${projectId}/groups`, { method: 'POST', body: JSON.stringify(data) }),
+    update: (groupId: string, data: any) =>
+      request(`/groups/${groupId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (groupId: string) =>
+      request(`/groups/${groupId}`, { method: 'DELETE' }),
+    reorder: (projectId: string, groupIds: string[]) =>
+      request(`/projects/${projectId}/groups/reorder`, { method: 'POST', body: JSON.stringify({ group_ids: groupIds }) }),
+    merge: (groupId: string, targetGroupId: string) =>
+      request(`/groups/${groupId}/merge/${targetGroupId}`, { method: 'POST' }),
+  },
   // Daily
   daily: {
     list: (params?: Record<string, string>) => request(`/daily-logs/?${new URLSearchParams(params)}`),

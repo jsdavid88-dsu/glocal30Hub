@@ -37,6 +37,15 @@ type TaskItem = {
   priority: string
   due_date?: string
   assignees?: Assignee[]
+  group_id?: string | null
+}
+
+type TaskGroup = {
+  id: string
+  name: string
+  color: string
+  status?: string
+  order_index?: number
 }
 
 type DailyBlock = {
@@ -85,11 +94,85 @@ const ROLE_LABELS: Record<string, string> = {
   manager: '매니저',
 }
 
+const PRESET_COLORS = [
+  { value: '#3B82F6', label: '파랑' },
+  { value: '#10B981', label: '초록' },
+  { value: '#F59E0B', label: '앰버' },
+  { value: '#EF4444', label: '빨강' },
+  { value: '#8B5CF6', label: '보라' },
+  { value: '#EC4899', label: '핑크' },
+  { value: '#06B6D4', label: '시안' },
+  { value: '#F97316', label: '주황' },
+]
+
 const cardStyle: React.CSSProperties = {
   background: '#ffffff',
   border: '1px solid #e2e8f0',
   borderRadius: '16px',
   boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)',
+}
+
+/* ── Group API helpers ─────────────────────────── */
+
+function groupHeaders() {
+  const token = localStorage.getItem('token')
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  } as Record<string, string>
+}
+
+async function fetchGroups(projectId: string): Promise<TaskGroup[]> {
+  const res = await fetch(`/api/v1/projects/${projectId}/groups`, { headers: groupHeaders() })
+  if (!res.ok) return []
+  const data = await res.json()
+  return Array.isArray(data) ? data : (data?.data || [])
+}
+
+async function createGroup(projectId: string, name: string, color: string): Promise<TaskGroup | null> {
+  const res = await fetch(`/api/v1/projects/${projectId}/groups`, {
+    method: 'POST',
+    headers: groupHeaders(),
+    body: JSON.stringify({ name, color }),
+  })
+  if (!res.ok) return null
+  return res.json()
+}
+
+async function updateGroup(groupId: string, data: Partial<{ name: string; color: string; status: string }>): Promise<TaskGroup | null> {
+  const res = await fetch(`/api/v1/groups/${groupId}`, {
+    method: 'PATCH',
+    headers: groupHeaders(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) return null
+  return res.json()
+}
+
+async function deleteGroupApi(groupId: string): Promise<boolean> {
+  const res = await fetch(`/api/v1/groups/${groupId}`, {
+    method: 'DELETE',
+    headers: groupHeaders(),
+  })
+  return res.ok
+}
+
+async function reorderGroups(projectId: string, groupIds: string[]): Promise<boolean> {
+  const res = await fetch(`/api/v1/projects/${projectId}/groups/reorder`, {
+    method: 'POST',
+    headers: groupHeaders(),
+    body: JSON.stringify({ group_ids: groupIds }),
+  })
+  return res.ok
+}
+
+/* ── Helper: lighten a hex color for background ── */
+
+function hexToTintBg(hex: string, alpha = 0.08): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${alpha})`
 }
 
 /* ── Component ─────────────────────────────────── */
@@ -104,6 +187,7 @@ export default function ProjectDetail() {
   const [members, setMembers] = useState<Member[]>([])
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [dailyBlocks, setDailyBlocks] = useState<DailyBlock[]>([])
+  const [groups, setGroups] = useState<TaskGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -115,13 +199,24 @@ export default function ProjectDetail() {
   const [memberSearchResults, setMemberSearchResults] = useState<any[]>([])
   const [memberSearchLoading, setMemberSearchLoading] = useState(false)
 
+  // Group management UI state
+  const [showGroupForm, setShowGroupForm] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [newGroupColor, setNewGroupColor] = useState(PRESET_COLORS[0].value)
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
+  const [editingGroupName, setEditingGroupName] = useState('')
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
   // New task form
   const [newTask, setNewTask] = useState({
     title: '',
     description: '',
     priority: 'medium',
     due_date: '',
+    group_id: '',
   })
+  // Track which group section triggered task creation
+  const [createTaskForGroup, setCreateTaskForGroup] = useState<string | null>(null)
 
   // Drag state
   const [dragTaskId, setDragTaskId] = useState<string | null>(null)
@@ -163,13 +258,28 @@ export default function ProjectDetail() {
       }
 
       if (membersRes.status === 'fulfilled') {
-        const data = (membersRes.value as any)?.data || membersRes.value || []
-        setMembers(Array.isArray(data) ? data : [])
+        const raw = (membersRes.value as any)?.data || membersRes.value || []
+        const data = (Array.isArray(raw) ? raw : []).map((m: any) => ({
+          id: m.id,
+          user_id: m.user_id || m.user?.id || '',
+          name: m.name || m.user?.name || m.user?.email || '',
+          email: m.email || m.user?.email || '',
+          project_role: m.project_role || 'member',
+        }))
+        setMembers(data)
       }
 
       if (tasksRes.status === 'fulfilled') {
         const data = (tasksRes.value as any)?.data || tasksRes.value || []
         setTasks(Array.isArray(data) ? data : [])
+      }
+
+      // Fetch groups
+      try {
+        const groupData = await fetchGroups(id)
+        setGroups(groupData)
+      } catch {
+        // non-critical
       }
 
       // Daily blocks (lower priority, don't block)
@@ -249,9 +359,11 @@ export default function ProjectDetail() {
         priority: newTask.priority,
         due_date: newTask.due_date || undefined,
         status: 'todo',
+        group_id: newTask.group_id || undefined,
       })
-      setNewTask({ title: '', description: '', priority: 'medium', due_date: '' })
+      setNewTask({ title: '', description: '', priority: 'medium', due_date: '', group_id: '' })
       setShowCreateTask(false)
+      setCreateTaskForGroup(null)
       fetchData()
     } catch {
       // handle error
@@ -270,6 +382,69 @@ export default function ProjectDetail() {
     } catch {
       // revert would go here
     }
+  }
+
+  /* ── Group Handlers ──────────────────────────── */
+
+  const handleCreateGroup = async () => {
+    if (!id || !newGroupName.trim()) return
+    const result = await createGroup(id, newGroupName.trim(), newGroupColor)
+    if (result) {
+      setGroups(prev => [...prev, result])
+    }
+    setNewGroupName('')
+    setNewGroupColor(PRESET_COLORS[0].value)
+    setShowGroupForm(false)
+  }
+
+  const handleUpdateGroupName = async (groupId: string) => {
+    if (!editingGroupName.trim()) {
+      setEditingGroupId(null)
+      return
+    }
+    const result = await updateGroup(groupId, { name: editingGroupName.trim() })
+    if (result) {
+      setGroups(prev => prev.map(g => g.id === groupId ? { ...g, name: result.name } : g))
+    }
+    setEditingGroupId(null)
+    setEditingGroupName('')
+  }
+
+  const handleDeleteGroup = async (groupId: string) => {
+    if (!confirm('그룹을 삭제하면 태스크는 \'미분류\'로 이동합니다')) return
+    const success = await deleteGroupApi(groupId)
+    if (success) {
+      setGroups(prev => prev.filter(g => g.id !== groupId))
+      // Move tasks to ungrouped locally
+      setTasks(prev => prev.map(t => t.group_id === groupId ? { ...t, group_id: null } : t))
+    }
+  }
+
+  const handleMoveGroup = async (index: number, direction: 'up' | 'down') => {
+    if (!id) return
+    const newIndex = direction === 'up' ? index - 1 : index + 1
+    if (newIndex < 0 || newIndex >= groups.length) return
+    const newGroups = [...groups]
+    const temp = newGroups[index]
+    newGroups[index] = newGroups[newIndex]
+    newGroups[newIndex] = temp
+    setGroups(newGroups)
+    await reorderGroups(id, newGroups.map(g => g.id))
+  }
+
+  const toggleGroupCollapse = (groupId: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
+  }
+
+  const openCreateTaskForGroup = (groupId: string | null) => {
+    setCreateTaskForGroup(groupId)
+    setNewTask({ title: '', description: '', priority: 'medium', due_date: '', group_id: groupId || '' })
+    setShowCreateTask(true)
   }
 
   /* ── Drag & Drop ────────────────────────────── */
@@ -292,13 +467,275 @@ export default function ProjectDetail() {
 
   /* ── Grouped Tasks ──────────────────────────── */
 
-  const tasksByStatus = (status: KanbanStatus) =>
+  const tasksByStatus = (status: KanbanStatus, groupId?: string | null) =>
     tasks.filter(t => {
-      // Map various status strings to kanban columns
       const s = t.status?.toLowerCase().replace(/\s/g, '_')
-      if (status === 'todo') return s === 'todo' || s === 'pending'
-      return s === status
+      const statusMatch = status === 'todo' ? (s === 'todo' || s === 'pending') : s === status
+      if (groupId === undefined) return statusMatch
+      if (groupId === null) return statusMatch && !t.group_id
+      return statusMatch && t.group_id === groupId
     })
+
+  const taskCountForGroup = (groupId: string | null) =>
+    tasks.filter(t => groupId === null ? !t.group_id : t.group_id === groupId).length
+
+  const statusSummaryForGroup = (groupId: string) => {
+    const groupTasks = tasks.filter(t => t.group_id === groupId)
+    const counts: Record<string, number> = {}
+    for (const col of KANBAN_COLUMNS) {
+      const c = groupTasks.filter(t => {
+        const s = t.status?.toLowerCase().replace(/\s/g, '_')
+        return col.key === 'todo' ? (s === 'todo' || s === 'pending') : s === col.key
+      }).length
+      if (c > 0) counts[col.label] = c
+    }
+    return Object.entries(counts).map(([label, count]) => `${count} ${label}`).join(', ')
+  }
+
+  const hasGroups = groups.length > 0
+
+  /* ── Render: Kanban columns ─────────────────── */
+
+  const renderKanbanColumns = (groupId?: string | null) => (
+    <div
+      className="kanban-scroll"
+      style={{
+        display: 'flex', gap: 12,
+        overflowX: 'auto', paddingBottom: 8,
+      }}
+    >
+      {KANBAN_COLUMNS.map(col => {
+        const colTasks = tasksByStatus(col.key, groupId)
+        return (
+          <div
+            key={col.key}
+            onDragOver={handleDragOver}
+            onDrop={e => handleDrop(e, col.key)}
+            style={{
+              flex: '1 0 200px', minWidth: 200, maxWidth: 280,
+              background: '#f8fafc', borderRadius: 12,
+              padding: 12,
+              display: 'flex', flexDirection: 'column',
+            }}
+          >
+            {/* Column Header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 12, padding: '0 4px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: col.color,
+                }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>
+                  {col.label}
+                </span>
+              </div>
+              <span style={{
+                fontSize: 11, fontWeight: 600, color: col.color,
+                background: col.bg, padding: '2px 8px', borderRadius: 99,
+              }}>
+                {colTasks.length}
+              </span>
+            </div>
+
+            {/* Task Cards */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 60 }}>
+              {colTasks.length === 0 ? (
+                <div style={{
+                  padding: 16, textAlign: 'center',
+                  border: '2px dashed #e2e8f0', borderRadius: 10,
+                  color: '#cbd5e1', fontSize: 12,
+                }}>
+                  비어있음
+                </div>
+              ) : (
+                colTasks.map(task => {
+                  const pri = PRIORITY_BADGE[task.priority] || PRIORITY_BADGE.medium
+                  return (
+                    <div
+                      key={task.id}
+                      draggable
+                      onDragStart={() => handleDragStart(task.id)}
+                      onClick={() => setSelectedTask(task)}
+                      style={{
+                        padding: '12px 14px', borderRadius: 10,
+                        background: '#fff', border: '1px solid #e2e8f0',
+                        cursor: 'pointer', transition: 'all 0.15s',
+                        boxShadow: dragTaskId === task.id
+                          ? '0 4px 12px rgba(0,0,0,0.1)'
+                          : '0 1px 2px rgba(0,0,0,0.03)',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = '#e2e8f0' }}
+                    >
+                      {/* Priority Badge */}
+                      <span style={{
+                        display: 'inline-block', fontSize: 10, fontWeight: 600,
+                        padding: '2px 6px', borderRadius: 4, marginBottom: 6,
+                        background: pri.bg, color: pri.color,
+                      }}>
+                        {pri.label}
+                      </span>
+
+                      {/* Title */}
+                      <p style={{
+                        fontSize: 13, fontWeight: 500, color: '#0f172a',
+                        margin: '0 0 8px 0', lineHeight: 1.4,
+                        overflow: 'hidden', textOverflow: 'ellipsis',
+                        display: '-webkit-box', WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}>
+                        {task.title}
+                      </p>
+
+                      {/* Footer: assignee + due date */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                        {/* Assignees */}
+                        <div style={{ display: 'flex', gap: -4 }}>
+                          {(task.assignees || []).slice(0, 3).map((a, idx) => (
+                            <div key={a.user_id || idx} style={{
+                              width: 22, height: 22, borderRadius: '50%',
+                              background: 'linear-gradient(135deg, #94a3b8, #64748b)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              border: '2px solid #fff',
+                              marginLeft: idx > 0 ? -6 : 0,
+                              flexShrink: 0,
+                            }}>
+                              <span style={{ color: '#fff', fontSize: 9, fontWeight: 600 }}>
+                                {(a.user_name || '?').charAt(0)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Due Date */}
+                        {task.due_date && (
+                          <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                            {task.due_date}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  /* ── Render: Create task form ────────────────── */
+
+  const renderCreateTaskForm = () => (
+    <div style={{
+      marginBottom: 20, padding: 20, background: '#f8fafc',
+      borderRadius: 12, border: '1px solid #e2e8f0',
+    }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <input
+          type="text"
+          placeholder="태스크 제목"
+          value={newTask.title}
+          onChange={e => setNewTask(prev => ({ ...prev, title: e.target.value }))}
+          style={{
+            width: '100%', padding: '10px 14px', borderRadius: 8,
+            border: '1px solid #e2e8f0', background: '#fff',
+            fontSize: 14, color: '#0f172a', outline: 'none',
+            boxSizing: 'border-box',
+          }}
+          autoFocus
+        />
+        <textarea
+          placeholder="설명 (선택사항)"
+          value={newTask.description}
+          onChange={e => setNewTask(prev => ({ ...prev, description: e.target.value }))}
+          rows={3}
+          style={{
+            width: '100%', padding: '10px 14px', borderRadius: 8,
+            border: '1px solid #e2e8f0', background: '#fff',
+            fontSize: 14, color: '#0f172a', outline: 'none',
+            resize: 'vertical', fontFamily: 'inherit',
+            boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            value={newTask.priority}
+            onChange={e => setNewTask(prev => ({ ...prev, priority: e.target.value }))}
+            style={{
+              padding: '8px 12px', borderRadius: 8,
+              border: '1px solid #e2e8f0', background: '#fff',
+              fontSize: 13, color: '#0f172a', outline: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="low">낮음</option>
+            <option value="medium">보통</option>
+            <option value="high">높음</option>
+            <option value="urgent">긴급</option>
+          </select>
+          <input
+            type="date"
+            value={newTask.due_date}
+            onChange={e => setNewTask(prev => ({ ...prev, due_date: e.target.value }))}
+            style={{
+              padding: '8px 12px', borderRadius: 8,
+              border: '1px solid #e2e8f0', background: '#fff',
+              fontSize: 13, color: '#0f172a', outline: 'none',
+            }}
+          />
+          {/* Group selector */}
+          {hasGroups && (
+            <select
+              value={newTask.group_id}
+              onChange={e => setNewTask(prev => ({ ...prev, group_id: e.target.value }))}
+              style={{
+                padding: '8px 12px', borderRadius: 8,
+                border: '1px solid #e2e8f0', background: '#fff',
+                fontSize: 13, color: '#0f172a', outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="">미분류</option>
+              {groups.map(g => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          )}
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={() => {
+              setShowCreateTask(false)
+              setCreateTaskForGroup(null)
+            }}
+            style={{
+              padding: '8px 16px', borderRadius: 8,
+              border: '1px solid #e2e8f0', background: '#fff',
+              fontSize: 13, color: '#64748b', cursor: 'pointer',
+            }}
+          >
+            취소
+          </button>
+          <button
+            onClick={handleCreateTask}
+            disabled={!newTask.title.trim()}
+            style={{
+              padding: '8px 16px', borderRadius: 8,
+              border: 'none', background: newTask.title.trim() ? '#4f46e5' : '#cbd5e1',
+              fontSize: 13, fontWeight: 600, color: '#fff',
+              cursor: newTask.title.trim() ? 'pointer' : 'default',
+            }}
+          >
+            생성
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 
   /* ── Render ─────────────────────────────────── */
 
@@ -569,15 +1006,232 @@ export default function ProjectDetail() {
         )}
       </div>
 
+      {/* ── Group Management Section ─────────── */}
+      {canManage && (
+        <div style={{ ...cardStyle, padding: '24px 28px', marginBottom: 24 }} className="opacity-0 animate-fade-in stagger-2">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#0f172a', margin: 0 }}>
+              그룹 관리
+            </h2>
+            <button
+              onClick={() => setShowGroupForm(!showGroupForm)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px', borderRadius: 8,
+                fontSize: 13, fontWeight: 500,
+                border: 'none', background: '#4f46e5', color: '#fff',
+                cursor: 'pointer', transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#3730a3' }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#4f46e5' }}
+            >
+              <svg style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              그룹 추가
+            </button>
+          </div>
+
+          {/* Add Group Inline Form */}
+          {showGroupForm && (
+            <div style={{
+              marginBottom: 16, padding: 16, background: '#f8fafc',
+              borderRadius: 12, border: '1px solid #e2e8f0',
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <input
+                  type="text"
+                  placeholder="그룹 이름"
+                  value={newGroupName}
+                  onChange={e => setNewGroupName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && newGroupName.trim()) handleCreateGroup() }}
+                  style={{
+                    width: '100%', padding: '10px 14px', borderRadius: 8,
+                    border: '1px solid #e2e8f0', background: '#fff',
+                    fontSize: 14, color: '#0f172a', outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                  autoFocus
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13, color: '#64748b', marginRight: 4 }}>색상:</span>
+                  {PRESET_COLORS.map(c => (
+                    <button
+                      key={c.value}
+                      onClick={() => setNewGroupColor(c.value)}
+                      title={c.label}
+                      style={{
+                        width: 28, height: 28, borderRadius: '50%',
+                        background: c.value, border: newGroupColor === c.value ? '3px solid #0f172a' : '2px solid #e2e8f0',
+                        cursor: 'pointer', transition: 'all 0.15s',
+                        flexShrink: 0,
+                      }}
+                    />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => { setShowGroupForm(false); setNewGroupName('') }}
+                    style={{
+                      padding: '8px 16px', borderRadius: 8,
+                      border: '1px solid #e2e8f0', background: '#fff',
+                      fontSize: 13, color: '#64748b', cursor: 'pointer',
+                    }}
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={handleCreateGroup}
+                    disabled={!newGroupName.trim()}
+                    style={{
+                      padding: '8px 16px', borderRadius: 8,
+                      border: 'none', background: newGroupName.trim() ? '#4f46e5' : '#cbd5e1',
+                      fontSize: 13, fontWeight: 600, color: '#fff',
+                      cursor: newGroupName.trim() ? 'pointer' : 'default',
+                    }}
+                  >
+                    추가
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Group Pills */}
+          {groups.length === 0 ? (
+            <p style={{ fontSize: 13, color: '#cbd5e1' }}>등록된 그룹이 없습니다. 그룹을 추가하면 칸반이 그룹별로 분류됩니다.</p>
+          ) : (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              {groups.map((group, idx) => (
+                <div
+                  key={group.id}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '8px 14px', borderRadius: 10,
+                    background: hexToTintBg(group.color, 0.1),
+                    borderLeft: `4px solid ${group.color}`,
+                    border: `1px solid ${hexToTintBg(group.color, 0.2)}`,
+                    borderLeftWidth: 4,
+                    borderLeftColor: group.color,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {/* Color dot */}
+                  <div style={{
+                    width: 10, height: 10, borderRadius: '50%',
+                    background: group.color, flexShrink: 0,
+                  }} />
+
+                  {/* Name (editable) */}
+                  {editingGroupId === group.id ? (
+                    <input
+                      type="text"
+                      value={editingGroupName}
+                      onChange={e => setEditingGroupName(e.target.value)}
+                      onBlur={() => handleUpdateGroupName(group.id)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') handleUpdateGroupName(group.id)
+                        if (e.key === 'Escape') { setEditingGroupId(null); setEditingGroupName('') }
+                      }}
+                      autoFocus
+                      style={{
+                        padding: '2px 6px', borderRadius: 4,
+                        border: '1px solid #e2e8f0', background: '#fff',
+                        fontSize: 13, fontWeight: 500, color: '#0f172a',
+                        outline: 'none', width: 100,
+                      }}
+                    />
+                  ) : (
+                    <span
+                      onClick={() => { setEditingGroupId(group.id); setEditingGroupName(group.name) }}
+                      style={{ fontSize: 13, fontWeight: 500, color: '#0f172a', cursor: 'pointer' }}
+                      title="클릭하여 이름 수정"
+                    >
+                      {group.name}
+                    </span>
+                  )}
+
+                  {/* Task count */}
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, color: group.color,
+                    background: hexToTintBg(group.color, 0.15),
+                    padding: '1px 7px', borderRadius: 99,
+                  }}>
+                    {taskCountForGroup(group.id)}
+                  </span>
+
+                  {/* Collapse toggle */}
+                  <button
+                    onClick={() => toggleGroupCollapse(group.id)}
+                    title={collapsedGroups.has(group.id) ? '펼치기' : '접기'}
+                    style={{
+                      padding: 2, border: 'none', background: 'none',
+                      cursor: 'pointer', color: '#64748b', fontSize: 12, lineHeight: 1,
+                    }}
+                  >
+                    {collapsedGroups.has(group.id) ? '▶' : '▼'}
+                  </button>
+
+                  {/* Reorder arrows */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                    <button
+                      onClick={() => handleMoveGroup(idx, 'up')}
+                      disabled={idx === 0}
+                      style={{
+                        padding: 0, border: 'none', background: 'none',
+                        cursor: idx === 0 ? 'default' : 'pointer',
+                        color: idx === 0 ? '#d1d5db' : '#64748b',
+                        fontSize: 10, lineHeight: 1,
+                      }}
+                      title="위로"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      onClick={() => handleMoveGroup(idx, 'down')}
+                      disabled={idx === groups.length - 1}
+                      style={{
+                        padding: 0, border: 'none', background: 'none',
+                        cursor: idx === groups.length - 1 ? 'default' : 'pointer',
+                        color: idx === groups.length - 1 ? '#d1d5db' : '#64748b',
+                        fontSize: 10, lineHeight: 1,
+                      }}
+                      title="아래로"
+                    >
+                      ▼
+                    </button>
+                  </div>
+
+                  {/* Delete */}
+                  <button
+                    onClick={() => handleDeleteGroup(group.id)}
+                    style={{
+                      padding: '2px 4px', border: 'none', background: 'none',
+                      cursor: 'pointer', color: '#94a3b8', fontSize: 14, lineHeight: 1,
+                      transition: 'color 0.15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.color = '#ef4444' }}
+                    onMouseLeave={e => { e.currentTarget.style.color = '#94a3b8' }}
+                    title="그룹 삭제"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Task Kanban Board ───────────────── */}
-      <div style={{ ...cardStyle, padding: '24px 28px', marginBottom: 24 }} className="opacity-0 animate-fade-in stagger-2">
+      <div style={{ ...cardStyle, padding: '24px 28px', marginBottom: 24 }} className="opacity-0 animate-fade-in stagger-3">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <h2 style={{ fontSize: 16, fontWeight: 600, color: '#0f172a', margin: 0 }}>
             태스크 ({tasks.length})
           </h2>
           {canManage && (
             <button
-              onClick={() => setShowCreateTask(!showCreateTask)}
+              onClick={() => openCreateTaskForGroup(null)}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 padding: '6px 14px', borderRadius: 8,
@@ -596,223 +1250,146 @@ export default function ProjectDetail() {
           )}
         </div>
 
-        {/* Create Task Inline Form */}
-        {showCreateTask && (
-          <div style={{
-            marginBottom: 20, padding: 20, background: '#f8fafc',
-            borderRadius: 12, border: '1px solid #e2e8f0',
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <input
-                type="text"
-                placeholder="태스크 제목"
-                value={newTask.title}
-                onChange={e => setNewTask(prev => ({ ...prev, title: e.target.value }))}
-                style={{
-                  width: '100%', padding: '10px 14px', borderRadius: 8,
-                  border: '1px solid #e2e8f0', background: '#fff',
-                  fontSize: 14, color: '#0f172a', outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-                autoFocus
-              />
-              <textarea
-                placeholder="설명 (선택사항)"
-                value={newTask.description}
-                onChange={e => setNewTask(prev => ({ ...prev, description: e.target.value }))}
-                rows={3}
-                style={{
-                  width: '100%', padding: '10px 14px', borderRadius: 8,
-                  border: '1px solid #e2e8f0', background: '#fff',
-                  fontSize: 14, color: '#0f172a', outline: 'none',
-                  resize: 'vertical', fontFamily: 'inherit',
-                  boxSizing: 'border-box',
-                }}
-              />
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                <select
-                  value={newTask.priority}
-                  onChange={e => setNewTask(prev => ({ ...prev, priority: e.target.value }))}
-                  style={{
-                    padding: '8px 12px', borderRadius: 8,
-                    border: '1px solid #e2e8f0', background: '#fff',
-                    fontSize: 13, color: '#0f172a', outline: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <option value="low">낮음</option>
-                  <option value="medium">보통</option>
-                  <option value="high">높음</option>
-                  <option value="urgent">긴급</option>
-                </select>
-                <input
-                  type="date"
-                  value={newTask.due_date}
-                  onChange={e => setNewTask(prev => ({ ...prev, due_date: e.target.value }))}
-                  style={{
-                    padding: '8px 12px', borderRadius: 8,
-                    border: '1px solid #e2e8f0', background: '#fff',
-                    fontSize: 13, color: '#0f172a', outline: 'none',
-                  }}
-                />
-                <div style={{ flex: 1 }} />
-                <button
-                  onClick={() => setShowCreateTask(false)}
-                  style={{
-                    padding: '8px 16px', borderRadius: 8,
-                    border: '1px solid #e2e8f0', background: '#fff',
-                    fontSize: 13, color: '#64748b', cursor: 'pointer',
-                  }}
-                >
-                  취소
-                </button>
-                <button
-                  onClick={handleCreateTask}
-                  disabled={!newTask.title.trim()}
-                  style={{
-                    padding: '8px 16px', borderRadius: 8,
-                    border: 'none', background: newTask.title.trim() ? '#4f46e5' : '#cbd5e1',
-                    fontSize: 13, fontWeight: 600, color: '#fff',
-                    cursor: newTask.title.trim() ? 'pointer' : 'default',
-                  }}
-                >
-                  생성
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Create Task Inline Form (top-level or for a specific group) */}
+        {showCreateTask && !createTaskForGroup && renderCreateTaskForm()}
 
-        {/* Kanban Columns */}
-        <div
-          className="kanban-scroll"
-          style={{
-            display: 'flex', gap: 12,
-            overflowX: 'auto', paddingBottom: 8,
-          }}
-        >
-          {KANBAN_COLUMNS.map(col => {
-            const colTasks = tasksByStatus(col.key)
-            return (
-              <div
-                key={col.key}
-                onDragOver={handleDragOver}
-                onDrop={e => handleDrop(e, col.key)}
-                style={{
-                  flex: '1 0 200px', minWidth: 200, maxWidth: 280,
-                  background: '#f8fafc', borderRadius: 12,
-                  padding: 12,
-                  display: 'flex', flexDirection: 'column',
-                }}
-              >
-                {/* Column Header */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  marginBottom: 12, padding: '0 4px',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{
-                      width: 8, height: 8, borderRadius: '50%',
-                      background: col.color,
-                    }} />
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>
-                      {col.label}
+        {/* ── Grouped Kanban or Flat Kanban ──── */}
+        {hasGroups ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* Each group section */}
+            {groups.map(group => {
+              const isCollapsed = collapsedGroups.has(group.id)
+              const groupTaskCount = taskCountForGroup(group.id)
+              return (
+                <div key={group.id}>
+                  {/* Group Header Bar */}
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '10px 16px', borderRadius: 10,
+                      background: hexToTintBg(group.color, 0.06),
+                      borderLeft: `4px solid ${group.color}`,
+                      marginBottom: isCollapsed ? 0 : 12,
+                      cursor: 'pointer',
+                      transition: 'background 0.15s',
+                    }}
+                    onClick={() => toggleGroupCollapse(group.id)}
+                    onMouseEnter={e => { e.currentTarget.style.background = hexToTintBg(group.color, 0.1) }}
+                    onMouseLeave={e => { e.currentTarget.style.background = hexToTintBg(group.color, 0.06) }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 13, color: '#64748b' }}>
+                        {isCollapsed ? '▶' : '▼'}
+                      </span>
+                      <div style={{
+                        width: 10, height: 10, borderRadius: '50%',
+                        background: group.color, flexShrink: 0,
+                      }} />
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
+                        {group.name}
+                      </span>
+                      {isCollapsed && (
+                        <span style={{ fontSize: 12, color: '#64748b', marginLeft: 4 }}>
+                          ({groupTaskCount} tasks{groupTaskCount > 0 ? `: ${statusSummaryForGroup(group.id)}` : ''})
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, color: group.color,
+                        background: hexToTintBg(group.color, 0.15),
+                        padding: '2px 10px', borderRadius: 99,
+                      }}>
+                        {groupTaskCount}
+                      </span>
+                      {canManage && !isCollapsed && (
+                        <button
+                          onClick={e => { e.stopPropagation(); openCreateTaskForGroup(group.id) }}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '4px 10px', borderRadius: 6,
+                            fontSize: 12, fontWeight: 500,
+                            border: '1px solid #e2e8f0', background: '#fff', color: '#64748b',
+                            cursor: 'pointer', transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = group.color; e.currentTarget.style.color = group.color }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.color = '#64748b' }}
+                          title="이 그룹에 태스크 추가"
+                        >
+                          <svg style={{ width: 12, height: 12 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                          </svg>
+                          추가
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Inline create form for this group */}
+                  {showCreateTask && createTaskForGroup === group.id && !isCollapsed && (
+                    <div style={{ marginBottom: 12 }}>
+                      {renderCreateTaskForm()}
+                    </div>
+                  )}
+
+                  {/* Kanban columns for this group */}
+                  {!isCollapsed && renderKanbanColumns(group.id)}
+                </div>
+              )
+            })}
+
+            {/* Ungrouped tasks section */}
+            {(() => {
+              const ungroupedCount = taskCountForGroup(null)
+              if (ungroupedCount === 0 && groups.length > 0) return null
+              const isCollapsed = collapsedGroups.has('__ungrouped__')
+              return (
+                <div>
+                  {/* Ungrouped Header */}
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '10px 16px', borderRadius: 10,
+                      background: '#f8fafc',
+                      borderLeft: '4px solid #94a3b8',
+                      marginBottom: isCollapsed ? 0 : 12,
+                      cursor: 'pointer',
+                      transition: 'background 0.15s',
+                    }}
+                    onClick={() => toggleGroupCollapse('__ungrouped__')}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 13, color: '#64748b' }}>
+                        {isCollapsed ? '▶' : '▼'}
+                      </span>
+                      <div style={{
+                        width: 10, height: 10, borderRadius: '50%',
+                        background: '#94a3b8', flexShrink: 0,
+                      }} />
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>
+                        미분류
+                      </span>
+                    </div>
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, color: '#64748b',
+                      background: '#f1f5f9',
+                      padding: '2px 10px', borderRadius: 99,
+                    }}>
+                      {ungroupedCount}
                     </span>
                   </div>
-                  <span style={{
-                    fontSize: 11, fontWeight: 600, color: col.color,
-                    background: col.bg, padding: '2px 8px', borderRadius: 99,
-                  }}>
-                    {colTasks.length}
-                  </span>
+
+                  {!isCollapsed && renderKanbanColumns(null)}
                 </div>
-
-                {/* Task Cards */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 60 }}>
-                  {colTasks.length === 0 ? (
-                    <div style={{
-                      padding: 16, textAlign: 'center',
-                      border: '2px dashed #e2e8f0', borderRadius: 10,
-                      color: '#cbd5e1', fontSize: 12,
-                    }}>
-                      비어있음
-                    </div>
-                  ) : (
-                    colTasks.map(task => {
-                      const pri = PRIORITY_BADGE[task.priority] || PRIORITY_BADGE.medium
-                      return (
-                        <div
-                          key={task.id}
-                          draggable
-                          onDragStart={() => handleDragStart(task.id)}
-                          onClick={() => setSelectedTask(task)}
-                          style={{
-                            padding: '12px 14px', borderRadius: 10,
-                            background: '#fff', border: '1px solid #e2e8f0',
-                            cursor: 'pointer', transition: 'all 0.15s',
-                            boxShadow: dragTaskId === task.id
-                              ? '0 4px 12px rgba(0,0,0,0.1)'
-                              : '0 1px 2px rgba(0,0,0,0.03)',
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
-                          onMouseLeave={e => { e.currentTarget.style.borderColor = '#e2e8f0' }}
-                        >
-                          {/* Priority Badge */}
-                          <span style={{
-                            display: 'inline-block', fontSize: 10, fontWeight: 600,
-                            padding: '2px 6px', borderRadius: 4, marginBottom: 6,
-                            background: pri.bg, color: pri.color,
-                          }}>
-                            {pri.label}
-                          </span>
-
-                          {/* Title */}
-                          <p style={{
-                            fontSize: 13, fontWeight: 500, color: '#0f172a',
-                            margin: '0 0 8px 0', lineHeight: 1.4,
-                            overflow: 'hidden', textOverflow: 'ellipsis',
-                            display: '-webkit-box', WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                          }}>
-                            {task.title}
-                          </p>
-
-                          {/* Footer: assignee + due date */}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                            {/* Assignees */}
-                            <div style={{ display: 'flex', gap: -4 }}>
-                              {(task.assignees || []).slice(0, 3).map((a, idx) => (
-                                <div key={a.user_id || idx} style={{
-                                  width: 22, height: 22, borderRadius: '50%',
-                                  background: 'linear-gradient(135deg, #94a3b8, #64748b)',
-                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                  border: '2px solid #fff',
-                                  marginLeft: idx > 0 ? -6 : 0,
-                                  flexShrink: 0,
-                                }}>
-                                  <span style={{ color: '#fff', fontSize: 9, fontWeight: 600 }}>
-                                    {(a.user_name || '?').charAt(0)}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* Due Date */}
-                            {task.due_date && (
-                              <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                                {task.due_date}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })()}
+          </div>
+        ) : (
+          /* Flat kanban — no groups */
+          renderKanbanColumns()
+        )}
       </div>
 
       {/* ── Task Detail Panel (Modal) ───────── */}
@@ -851,6 +1428,25 @@ export default function ProjectDetail() {
                 </svg>
               </button>
             </div>
+
+            {/* Group badge */}
+            {selectedTask.group_id && (() => {
+              const g = groups.find(gr => gr.id === selectedTask.group_id)
+              if (!g) return null
+              return (
+                <div style={{ marginBottom: 16 }}>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    fontSize: 12, fontWeight: 600,
+                    padding: '4px 10px', borderRadius: 6,
+                    background: hexToTintBg(g.color, 0.1), color: g.color,
+                  }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: g.color }} />
+                    {g.name}
+                  </span>
+                </div>
+              )
+            })()}
 
             {/* Description */}
             {selectedTask.description && (
@@ -969,7 +1565,7 @@ export default function ProjectDetail() {
 
       {/* ── Recent Daily Blocks ─────────────── */}
       {dailyBlocks.length > 0 && (
-        <div style={{ ...cardStyle, padding: '24px 28px', marginBottom: 24 }} className="opacity-0 animate-fade-in stagger-3">
+        <div style={{ ...cardStyle, padding: '24px 28px', marginBottom: 24 }} className="opacity-0 animate-fade-in stagger-4">
           <h2 style={{ fontSize: 16, fontWeight: 600, color: '#0f172a', margin: '0 0 16px 0' }}>
             최근 데일리 기록
           </h2>

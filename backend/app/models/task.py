@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +23,31 @@ class TaskPriority(str, enum.Enum):
     high = "high"
 
 
+class TaskGroupStatus(str, enum.Enum):
+    open = "open"
+    closed = "closed"
+
+
+class TaskGroup(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "task_groups"
+    __table_args__ = (
+        Index("ix_task_groups_project_id", "project_id"),
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="#6366f1")
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[TaskGroupStatus] = mapped_column(
+        Enum(TaskGroupStatus), nullable=False, default=TaskGroupStatus.open
+    )
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    tasks: Mapped[list["Task"]] = relationship(back_populates="group")
+
+
 class Task(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "tasks"
     __table_args__ = (
@@ -31,6 +56,7 @@ class Task(UUIDMixin, TimestampMixin, Base):
         Index("ix_tasks_due_date", "due_date"),
         Index("ix_tasks_priority", "priority"),
         Index("ix_tasks_parent_id", "parent_id"),
+        Index("ix_tasks_group_id", "group_id"),
     )
 
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -55,6 +81,9 @@ class Task(UUIDMixin, TimestampMixin, Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
     )
+    group_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("task_groups.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Self-referential hierarchy
     children: Mapped[list["Task"]] = relationship(
@@ -66,6 +95,7 @@ class Task(UUIDMixin, TimestampMixin, Base):
         foreign_keys="Task.parent_id",
     )
 
+    group: Mapped["TaskGroup | None"] = relationship(back_populates="tasks")
     assignees: Mapped[list["TaskAssignee"]] = relationship(back_populates="task")
 
 

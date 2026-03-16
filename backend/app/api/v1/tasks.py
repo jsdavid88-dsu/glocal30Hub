@@ -4,19 +4,23 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.project import Project
-from app.models.task import Task, TaskAssignee, TaskPriority, TaskStatus
+from app.models.task import Task, TaskAssignee, TaskGroup, TaskGroupStatus, TaskPriority, TaskStatus
 from app.models.user import User, UserRole
 from app.schemas.task import (
     TaskAssigneeCreate,
     TaskAssigneeResponse,
     TaskCreate,
+    TaskGroupCreate,
+    TaskGroupReorder,
+    TaskGroupResponse,
+    TaskGroupUpdate,
     TaskListResponse,
     TaskResponse,
     TaskStatusUpdate,
@@ -168,6 +172,240 @@ async def _validate_parent(
         )
 
 
+async def _get_group_or_404(db: AsyncSession, group_id: uuid.UUID) -> TaskGroup:
+    """Fetch a task group by ID; raise 404 if not found."""
+    result = await db.execute(select(TaskGroup).where(TaskGroup.id == group_id))
+    group = result.scalar_one_or_none()
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task group not found")
+    return group
+
+
+# ── TaskGroup endpoints ──────────────────────────────────────────────────────
+
+
+@router.get("/projects/{project_id}/groups", response_model=list[TaskGroupResponse])
+async def list_project_groups(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """List task groups for a project, ordered by `order` field, with task_count."""
+    await _check_project_exists(db, project_id)
+
+    # Fetch groups with task count via subquery
+    task_count_subq = (
+        select(Task.group_id, func.count().label("task_count"))
+        .where(Task.group_id.isnot(None))
+        .group_by(Task.group_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(TaskGroup, func.coalesce(task_count_subq.c.task_count, 0).label("task_count"))
+        .outerjoin(task_count_subq, TaskGroup.id == task_count_subq.c.group_id)
+        .where(TaskGroup.project_id == project_id)
+        .order_by(TaskGroup.order.asc(), TaskGroup.created_at.asc())
+    )
+    rows = result.all()
+
+    return [
+        TaskGroupResponse(
+            id=group.id,
+            project_id=group.project_id,
+            name=group.name,
+            color=group.color,
+            order=group.order,
+            status=group.status,
+            description=group.description,
+            task_count=task_count,
+            created_at=group.created_at,
+        )
+        for group, task_count in rows
+    ]
+
+
+@router.post("/projects/{project_id}/groups", response_model=TaskGroupResponse, status_code=201)
+async def create_group(
+    project_id: uuid.UUID,
+    body: TaskGroupCreate,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Create a new task group in a project."""
+    await _check_project_exists(db, project_id)
+
+    # Determine the next order value
+    result = await db.execute(
+        select(func.coalesce(func.max(TaskGroup.order), -1) + 1)
+        .where(TaskGroup.project_id == project_id)
+    )
+    next_order = result.scalar()
+
+    group = TaskGroup(
+        project_id=project_id,
+        name=body.name,
+        color=body.color,
+        description=body.description,
+        order=next_order,
+    )
+    db.add(group)
+    await db.commit()
+    await db.refresh(group)
+
+    return TaskGroupResponse(
+        id=group.id,
+        project_id=group.project_id,
+        name=group.name,
+        color=group.color,
+        order=group.order,
+        status=group.status,
+        description=group.description,
+        task_count=0,
+        created_at=group.created_at,
+    )
+
+
+@router.patch("/groups/{group_id}", response_model=TaskGroupResponse)
+async def update_group(
+    group_id: uuid.UUID,
+    body: TaskGroupUpdate,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Update a task group (name, color, description, status)."""
+    group = await _get_group_or_404(db, group_id)
+
+    update_data = body.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(group, field, value)
+
+    await db.commit()
+    await db.refresh(group)
+
+    # Get task count
+    result = await db.execute(
+        select(func.count()).where(Task.group_id == group_id)
+    )
+    task_count = result.scalar() or 0
+
+    return TaskGroupResponse(
+        id=group.id,
+        project_id=group.project_id,
+        name=group.name,
+        color=group.color,
+        order=group.order,
+        status=group.status,
+        description=group.description,
+        task_count=task_count,
+        created_at=group.created_at,
+    )
+
+
+@router.delete("/groups/{group_id}", status_code=204)
+async def delete_group(
+    group_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Delete a task group. Tasks in this group get group_id set to NULL (not deleted)."""
+    group = await _get_group_or_404(db, group_id)
+
+    # Nullify group_id on all tasks in this group
+    await db.execute(
+        update(Task).where(Task.group_id == group_id).values(group_id=None)
+    )
+
+    await db.delete(group)
+    await db.commit()
+
+
+@router.post("/projects/{project_id}/groups/reorder", response_model=list[TaskGroupResponse])
+async def reorder_groups(
+    project_id: uuid.UUID,
+    body: TaskGroupReorder,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Bulk reorder task groups. Receives ordered list of group_ids, updates order field."""
+    await _check_project_exists(db, project_id)
+
+    # Fetch all groups for this project to validate
+    result = await db.execute(
+        select(TaskGroup).where(TaskGroup.project_id == project_id)
+    )
+    groups = {g.id: g for g in result.scalars().all()}
+
+    # Validate all provided IDs belong to this project
+    for gid in body.group_ids:
+        if gid not in groups:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Group {gid} not found in project",
+            )
+
+    # Update order based on position in the list
+    for idx, gid in enumerate(body.group_ids):
+        groups[gid].order = idx
+
+    await db.commit()
+
+    # Return updated list using the list endpoint logic
+    return await list_project_groups(project_id, db, _current_user)
+
+
+@router.post("/groups/{group_id}/merge/{target_group_id}", response_model=TaskGroupResponse)
+async def merge_groups(
+    group_id: uuid.UUID,
+    target_group_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Merge: move all tasks from source group to target, then delete source group."""
+    if group_id == target_group_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot merge a group into itself",
+        )
+
+    source = await _get_group_or_404(db, group_id)
+    target = await _get_group_or_404(db, target_group_id)
+
+    if source.project_id != target.project_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source and target groups must belong to the same project",
+        )
+
+    # Move all tasks from source to target
+    await db.execute(
+        update(Task).where(Task.group_id == group_id).values(group_id=target_group_id)
+    )
+
+    # Delete source group
+    await db.delete(source)
+    await db.commit()
+
+    # Return target group with updated task count
+    await db.refresh(target)
+    result = await db.execute(
+        select(func.count()).where(Task.group_id == target_group_id)
+    )
+    task_count = result.scalar() or 0
+
+    return TaskGroupResponse(
+        id=target.id,
+        project_id=target.project_id,
+        name=target.name,
+        color=target.color,
+        order=target.order,
+        status=target.status,
+        description=target.description,
+        task_count=task_count,
+        created_at=target.created_at,
+    )
+
+
 # ── Project-scoped task endpoints ────────────────────────────────────────────
 
 
@@ -279,6 +517,15 @@ async def create_task(
     if body.parent_id is not None:
         await _validate_parent(db, body.parent_id, project_id)
 
+    # Validate group_id if provided
+    if body.group_id is not None:
+        group = await _get_group_or_404(db, body.group_id)
+        if group.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Task group must belong to the same project",
+            )
+
     task = Task(
         project_id=project_id,
         title=body.title,
@@ -286,6 +533,7 @@ async def create_task(
         priority=body.priority,
         due_date=body.due_date,
         parent_id=body.parent_id,
+        group_id=body.group_id,
         created_by=current_user.id,
         updated_by=current_user.id,
     )
@@ -450,6 +698,15 @@ async def update_task(
     # Validate parent_id if being changed
     if "parent_id" in update_data and update_data["parent_id"] is not None:
         await _validate_parent(db, update_data["parent_id"], task.project_id, task_id=task_id)
+
+    # Validate group_id if being changed
+    if "group_id" in update_data and update_data["group_id"] is not None:
+        group = await _get_group_or_404(db, update_data["group_id"])
+        if group.project_id != task.project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Task group must belong to the same project",
+            )
 
     for field, value in update_data.items():
         setattr(task, field, value)

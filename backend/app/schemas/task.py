@@ -3,8 +3,46 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.task import TaskPriority, TaskStatus
+from app.models.task import TaskGroupStatus, TaskPriority, TaskStatus
 from app.schemas.user import UserSummaryResponse
+
+
+# ── TaskGroup Schemas ────────────────────────────────────────────────────────
+
+
+class TaskGroupCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    color: str = Field(default="#6366f1", max_length=20)
+    description: str | None = None
+
+
+class TaskGroupUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255)
+    color: str | None = Field(None, max_length=20)
+    order: int | None = None
+    status: TaskGroupStatus | None = None
+    description: str | None = None
+
+
+class TaskGroupResponse(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    color: str
+    order: int
+    status: TaskGroupStatus
+    description: str | None = None
+    task_count: int = 0
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TaskGroupReorder(BaseModel):
+    group_ids: list[uuid.UUID] = Field(..., min_length=1)
+
+
+# ── Task Schemas ─────────────────────────────────────────────────────────────
 
 
 class TaskCreate(BaseModel):
@@ -13,6 +51,7 @@ class TaskCreate(BaseModel):
     priority: TaskPriority = TaskPriority.medium
     due_date: date | None = None
     parent_id: uuid.UUID | None = None
+    group_id: uuid.UUID | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -21,6 +60,7 @@ class TaskUpdate(BaseModel):
     priority: TaskPriority | None = None
     due_date: date | None = None
     parent_id: uuid.UUID | None = None
+    group_id: uuid.UUID | None = None
 
 
 class TaskStatusUpdate(BaseModel):
@@ -52,6 +92,7 @@ class TaskSummaryResponse(BaseModel):
     priority: TaskPriority
     due_date: date | None = None
     parent_id: uuid.UUID | None = None
+    group_id: uuid.UUID | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -66,6 +107,7 @@ class TaskResponse(BaseModel):
     priority: TaskPriority
     due_date: date | None = None
     parent_id: uuid.UUID | None = None
+    group_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
     updated_by: uuid.UUID | None = None
     created_at: datetime

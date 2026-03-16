@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useRole } from '../contexts/RoleContext'
 import { api } from '../api/client'
 
@@ -62,6 +63,7 @@ const cardStyle = {
 
 export default function Projects() {
   const { currentRole } = useRole()
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<Status | 'all'>('all')
   const [search, setSearch] = useState('')
   const [projects, setProjects] = useState<ProjectRow[]>([])
@@ -352,7 +354,7 @@ export default function Projects() {
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                     </svg>
-                    <div style={{ minWidth: 0 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
                       <p style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {project.name}
                       </p>
@@ -360,6 +362,21 @@ export default function Projects() {
                         {project.code}
                       </p>
                     </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(`/projects/${project.id}`) }}
+                      title="상세 페이지"
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        width: 28, height: 28, borderRadius: 6, border: '1px solid #e2e8f0',
+                        background: '#fff', cursor: 'pointer', color: '#64748b', flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = '#4f46e5'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#4f46e5' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#64748b'; e.currentTarget.style.borderColor = '#e2e8f0' }}
+                    >
+                      <svg style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </button>
                   </div>
 
                   {/* Status Badge */}
