@@ -1020,10 +1020,12 @@ function ProfessorWeekly() {
                   학생 데이터가 없습니다
                 </div>
               ) : summaryView === 'all' ? (
-                <>
-                  {summaryHeaderRow}
-                  {apiStudentSummaries.map((s, idx) => renderStudentRow(s, idx, apiStudentSummaries.length))}
-                </>
+                <div className="weekly-summary-table">
+                  <div>
+                    {summaryHeaderRow}
+                    {apiStudentSummaries.map((s, idx) => renderStudentRow(s, idx, apiStudentSummaries.length))}
+                  </div>
+                </div>
               ) : (
                 <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {projectGroupedSummaries.map((group) => {
@@ -1333,6 +1335,15 @@ function ProfessorWeekly() {
           @media (max-width: 900px) {
             .weekly-dnd-layout {
               grid-template-columns: 1fr !important;
+            }
+          }
+          @media (max-width: 767px) {
+            .weekly-summary-table {
+              overflow-x: auto;
+              -webkit-overflow-scrolling: touch;
+            }
+            .weekly-summary-table > div {
+              min-width: 520px;
             }
           }
         `}</style>

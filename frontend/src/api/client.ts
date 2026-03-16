@@ -154,6 +154,28 @@ export const api = {
     delete: (id: string) =>
       request(`/notifications/${id}`, { method: 'DELETE' }),
   },
+  // Reports
+  reports: {
+    list: (params?: Record<string, string>) => request(`/reports/?${new URLSearchParams(params)}`),
+    get: (id: string) => request(`/reports/${id}`),
+    create: (data: any) => request('/reports/', { method: 'POST', body: JSON.stringify(data) }),
+    generate: (data: any) => request('/reports/generate', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id: string) => request(`/reports/${id}`, { method: 'DELETE' }),
+  },
+  // SOTA
+  sota: {
+    list: (params?: Record<string, string>) => request(`/sota/?${new URLSearchParams(params)}`),
+    get: (id: string) => request(`/sota/${id}`),
+    create: (data: any) => request('/sota/', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: any) => request(`/sota/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) => request(`/sota/${id}`, { method: 'DELETE' }),
+    assign: (id: string, data: any) => request(`/sota/${id}/assign`, { method: 'POST', body: JSON.stringify(data) }),
+    updateAssignment: (assignmentId: string, data: any) =>
+      request(`/sota/assignments/${assignmentId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    submitReview: (assignmentId: string, data: any) =>
+      request(`/sota/assignments/${assignmentId}/review`, { method: 'POST', body: JSON.stringify(data) }),
+    my: (params?: Record<string, string>) => request(`/sota/my?${new URLSearchParams(params)}`),
+  },
   // Admin
   admin: {
     users: () => request('/admin/users'),

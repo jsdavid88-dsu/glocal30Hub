@@ -103,3 +103,15 @@ body {
 .stagger-4 { animation-delay: 0.2s; }
 .stagger-5 { animation-delay: 0.25s; }
 .stagger-6 { animation-delay: 0.3s; }
+
+/* Mobile responsive overrides */
+@media (max-width: 767px) {
+  .kanban-scroll {
+    flex-direction: column !important;
+  }
+
+  /* Prevent horizontal overflow on root */
+  body, #root {
+    overflow-x: hidden;
+  }
+}

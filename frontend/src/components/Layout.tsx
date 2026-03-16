@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useRole, type Role } from '../contexts/RoleContext'
 import { useAuth } from '../contexts/AuthContext'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 
 interface NotificationItem {
   id: string
@@ -136,6 +137,8 @@ const allNavItems = [
   {
     section: 'Management',
     items: [
+      { path: '/sota', label: 'SOTA', icon: SotaIcon, roles: ['professor', 'student', 'external'] as Role[] },
+      { path: '/reports', label: 'Reports', icon: ReportsIcon, roles: ['professor', 'student'] as Role[] },
       { path: '/members', label: 'Students', icon: TeamIcon, roles: ['professor'] as Role[] },
       { path: '/calendar', label: 'Calendar', icon: CalendarIcon, roles: ['professor', 'student', 'external'] as Role[] },
       { path: '/attendance', label: 'Attendance', icon: AttendanceIcon, roles: ['student'] as Role[] },
@@ -162,19 +165,17 @@ export default function Layout() {
   const { currentRole, setRole } = useRole()
   const { user, logout } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [width, setWidth] = useState(window.innerWidth)
+  const isDesktop = useMediaQuery('(min-width: 768px)')
+  const isWide = useMediaQuery('(min-width: 1024px)')
 
+  // Auto-close sidebar when switching to desktop
   useEffect(() => {
-    const onResize = () => setWidth(window.innerWidth)
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
+    if (isDesktop) setMobileOpen(false)
+  }, [isDesktop])
 
   useEffect(() => {
     setMobileOpen(false)
   }, [location.pathname])
-
-  const isDesktop = width >= 1024
 
   const navItems = allNavItems.map((group) => ({
     ...group,
@@ -271,39 +272,41 @@ export default function Layout() {
             </h2>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {/* DEV Role Switcher */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '4px 6px', borderRadius: 10,
-              background: '#fef3c7', border: '1px solid #fbbf24',
-            }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', padding: '0 4px', whiteSpace: 'nowrap' as const }}>
-                [DEV] 역할 전환
-              </span>
-              {(['professor', 'student', 'external'] as Role[]).map((role) => {
-                const active = currentRole === role
-                const labels: Record<Role, string> = { professor: '교수', student: '학생', external: '외부업체' }
-                return (
-                  <button
-                    key={role}
-                    onClick={() => setRole(role)}
-                    style={{
-                      padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                      border: 'none', cursor: 'pointer',
-                      background: active ? '#4f46e5' : 'transparent',
-                      color: active ? '#fff' : '#92400e',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    {labels[role]}
-                  </button>
-                )
-              })}
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? 16 : 8 }}>
+            {/* DEV Role Switcher — hidden on mobile */}
+            {isDesktop && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '4px 6px', borderRadius: 10,
+                background: '#fef3c7', border: '1px solid #fbbf24',
+              }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', padding: '0 4px', whiteSpace: 'nowrap' as const }}>
+                  [DEV] 역할 전환
+                </span>
+                {(['professor', 'student', 'external'] as Role[]).map((role) => {
+                  const active = currentRole === role
+                  const labels: Record<Role, string> = { professor: '교수', student: '학생', external: '외부업체' }
+                  return (
+                    <button
+                      key={role}
+                      onClick={() => setRole(role)}
+                      style={{
+                        padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                        border: 'none', cursor: 'pointer',
+                        background: active ? '#4f46e5' : 'transparent',
+                        color: active ? '#fff' : '#92400e',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {labels[role]}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
             <NotificationBell />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingLeft: 16, borderLeft: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? 12 : 8, paddingLeft: isDesktop ? 16 : 8, borderLeft: '1px solid #e2e8f0' }}>
               <div style={{ position: 'relative' }}>
                 <div style={{ width: 32, height: 32, borderRadius: '50%', background: rc.gradient, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>{rc.initials}</span>
@@ -319,7 +322,7 @@ export default function Layout() {
                   {rc.label}
                 </span>
               </div>
-              {isDesktop && (
+              {isWide && (
                 <div>
                   <p style={{ fontSize: 13, fontWeight: 500, color: '#0f172a', lineHeight: 1 }}>{user?.name ?? rc.title}</p>
                   <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{rc.subtitle}</p>
@@ -335,7 +338,7 @@ export default function Layout() {
         </header>
 
         {/* Page content */}
-        <main style={{ flex: 1, overflowY: 'auto', background: '#f8fafc', padding: isDesktop ? '28px 32px' : '20px 16px' }}>
+        <main style={{ flex: 1, overflowY: 'auto', background: '#f8fafc', padding: isWide ? '28px 32px' : isDesktop ? '24px 20px' : '16px 12px' }}>
           <Outlet />
         </main>
       </div>
@@ -387,7 +390,7 @@ function NotificationBell() {
       {open && (
         <div style={{
           position: 'absolute', top: '100%', right: 0, marginTop: 4,
-          width: 360, maxHeight: 400,
+          width: 'min(360px, calc(100vw - 24px))', maxHeight: 400,
           background: '#fff', borderRadius: 12,
           boxShadow: '0 4px 24px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08)',
           border: '1px solid #e2e8f0',
@@ -502,7 +505,8 @@ function NotificationBell() {
 function getPageTitle(path: string) {
   const titles: Record<string, string> = {
     '/': 'Dashboard', '/projects': 'Projects', '/daily/feed': 'Daily',
-    '/daily/write': 'Daily Write', '/weekly': 'Weekly', '/members': 'Students', '/calendar': 'Calendar',
+    '/daily/write': 'Daily Write', '/weekly': 'Weekly', '/sota': 'SOTA', '/reports': 'Reports',
+    '/members': 'Students', '/calendar': 'Calendar',
     '/attendance': 'Attendance', '/profile': 'Profile', '/admin': 'Admin', '/notifications': '알림',
   }
   return titles[path] || 'R&D Hub'
@@ -537,6 +541,12 @@ function AttendanceIcon({ active }: { active: boolean }) {
 }
 function ProfileIcon({ active }: { active: boolean }) {
   return <svg style={{ width: 18, height: 18, color: active ? '#4f46e5' : undefined }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+}
+function SotaIcon({ active }: { active: boolean }) {
+  return <svg style={{ width: 18, height: 18, color: active ? '#4f46e5' : undefined }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+}
+function ReportsIcon({ active }: { active: boolean }) {
+  return <svg style={{ width: 18, height: 18, color: active ? '#4f46e5' : undefined }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
 }
 function AdminIcon({ active }: { active: boolean }) {
   return <svg style={{ width: 18, height: 18, color: active ? '#4f46e5' : undefined }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>

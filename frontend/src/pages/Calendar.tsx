@@ -507,9 +507,33 @@ export default function Calendar() {
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+      <style>{`
+        @media (max-width: 767px) {
+          .cal-header-row {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 12px !important;
+          }
+          .cal-nav-row {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 12px !important;
+          }
+          .cal-legend {
+            display: none !important;
+          }
+          .cal-grid-wrap {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+          }
+          .cal-grid-wrap > div {
+            min-width: 500px;
+          }
+        }
+      `}</style>
       {/* Header */}
       <div style={{ marginBottom: 32 }} className="animate-fade-in">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="cal-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <h1 style={{ fontSize: 26, fontWeight: 600, color: '#0f172a', fontFamily: 'var(--font-display)' }}>
               캘린더
@@ -576,7 +600,7 @@ export default function Calendar() {
       )}
 
       {/* Navigation */}
-      <div className="opacity-0 animate-fade-in stagger-1" style={{
+      <div className="opacity-0 animate-fade-in stagger-1 cal-nav-row" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -608,7 +632,7 @@ export default function Calendar() {
         </div>
 
         {/* Legend */}
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
+        <div className="cal-legend" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
           {Object.entries(eventTypeConfig).map(([key, cfg]) => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: cfg.dot }} />
@@ -639,7 +663,7 @@ export default function Calendar() {
       {/* ===================== MONTHLY VIEW ===================== */}
       {viewMode === 'monthly' && (
         <>
-          <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden' }}>
+          <div className="opacity-0 animate-fade-in stagger-2 cal-grid-wrap" style={{ ...cardStyle, overflow: 'hidden' }}>
             {/* Day Headers */}
             <div style={{
               display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
@@ -721,7 +745,7 @@ export default function Calendar() {
 
       {/* ===================== WEEKLY VIEW ===================== */}
       {viewMode === 'weekly' && (
-        <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden' }}>
+        <div className="opacity-0 animate-fade-in stagger-2 cal-grid-wrap" style={{ ...cardStyle, overflow: 'hidden' }}>
           {/* Day headers */}
           <div style={{
             display: 'grid', gridTemplateColumns: '60px repeat(7, 1fr)',

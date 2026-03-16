@@ -17,6 +17,8 @@ import ProjectDetail from './pages/ProjectDetail'
 import Admin from './pages/Admin'
 import Notifications from './pages/Notifications'
 import MemberDetail from './pages/MemberDetail'
+import Sota from './pages/Sota'
+import Reports from './pages/Reports'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth()
@@ -47,6 +49,8 @@ function App() {
               <Route path="/weekly" element={<Weekly />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/sota" element={<Sota />} />
+              <Route path="/reports" element={<Reports />} />
             </Route>
           </Routes>
         </BrowserRouter>
