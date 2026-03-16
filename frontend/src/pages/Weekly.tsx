@@ -371,7 +371,7 @@ function StudentDropCard({
   assignedTasks: string[]
   allTasks: TaskItem[]
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `student-${student.name}` })
+  const { setNodeRef, isOver } = useDroppable({ id: `student-${student.id || student.name}` })
 
   const tasks = assignedTasks
     .map((tid) => allTasks.find((t) => t.id === tid))
@@ -481,6 +481,9 @@ function ProfessorWeekly() {
   // Task pool state
   const [allTasks, setAllTasks] = useState<TaskItem[]>([])
   const [assignments, setAssignments] = useState<Record<string, string[]>>({})
+
+  // Save status for drag-and-drop assignments
+  const [assignSaveStatus, setAssignSaveStatus] = useState<'saving' | 'saved' | 'error' | null>(null)
 
   // Student summaries from API
   const [apiStudentSummaries, setApiStudentSummaries] = useState<StudentSummary[]>([])
@@ -746,7 +749,11 @@ function ProfessorWeekly() {
 
     // Dropping on a student zone
     if (overId.startsWith('student-')) {
-      const studentName = overId.replace('student-', '')
+      const studentIdentifier = overId.replace('student-', '')
+      const student = apiStudents.find((s) => s.id === studentIdentifier) || apiStudents.find((s) => s.name === studentIdentifier)
+      if (!student) return
+
+      const studentName = student.name
 
       // Already assigned to this student
       if (currentOwner === studentName) return
@@ -763,9 +770,14 @@ function ProfessorWeekly() {
       })
 
       // Persist assignment to API with rollback on failure
-      const student = apiStudents.find((s) => s.name === studentName)
-      if (student?.id) {
-        api.tasks.assign(taskId, student.id, true).catch(() => {
+      if (student.id) {
+        setAssignSaveStatus('saving')
+        api.tasks.assign(taskId, student.id, true).then(() => {
+          setAssignSaveStatus('saved')
+          setTimeout(() => setAssignSaveStatus(null), 2000)
+        }).catch(() => {
+          setAssignSaveStatus('error')
+          setTimeout(() => setAssignSaveStatus(null), 3000)
           // Rollback: remove from student, put back to previous owner or pool
           setAssignments((prev) => {
             const next = { ...prev }
@@ -790,7 +802,13 @@ function ProfessorWeekly() {
         // Unassign from API with rollback on failure
         const student = apiStudents.find((s) => s.name === currentOwner)
         if (student?.id) {
-          api.tasks.unassign(taskId, student.id).catch(() => {
+          setAssignSaveStatus('saving')
+          api.tasks.unassign(taskId, student.id).then(() => {
+            setAssignSaveStatus('saved')
+            setTimeout(() => setAssignSaveStatus(null), 2000)
+          }).catch(() => {
+            setAssignSaveStatus('error')
+            setTimeout(() => setAssignSaveStatus(null), 3000)
             // Rollback: re-assign to previous owner
             setAssignments((prev) => {
               const next = { ...prev }
@@ -1221,7 +1239,18 @@ function ProfessorWeekly() {
                 <div style={{ padding: '0 0 4px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                   <div>
                     <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>학생</h3>
-                    <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>태스크를 드롭하여 배정</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                      <p style={{ fontSize: 13, color: '#94a3b8' }}>태스크를 드롭하여 배정</p>
+                      {assignSaveStatus === 'saving' && (
+                        <span style={{ fontSize: 12, color: '#6366f1', fontWeight: 500 }}>저장 중...</span>
+                      )}
+                      {assignSaveStatus === 'saved' && (
+                        <span style={{ fontSize: 12, color: '#059669', fontWeight: 500 }}>저장됨</span>
+                      )}
+                      {assignSaveStatus === 'error' && (
+                        <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 500 }}>저장 실패 - 배정이 취소되었습니다</span>
+                      )}
+                    </div>
                   </div>
                   <select
                     value={dndProjectFilter}

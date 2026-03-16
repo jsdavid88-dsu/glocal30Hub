@@ -457,12 +457,31 @@ export default function ProjectDetail() {
     e.preventDefault()
   }
 
-  const handleDrop = (e: React.DragEvent, targetStatus: KanbanStatus) => {
+  const handleDrop = async (e: React.DragEvent, targetStatus: KanbanStatus, targetGroupId?: string | null) => {
     e.preventDefault()
-    if (dragTaskId) {
+    if (!dragTaskId) return
+
+    const task = tasks.find(t => t.id === dragTaskId)
+    if (!task) { setDragTaskId(null); return }
+
+    // Update status if changed
+    const currentStatus = task.status?.toLowerCase().replace(/\s/g, '_')
+    const statusChanged = currentStatus !== targetStatus && !(targetStatus === 'todo' && (currentStatus === 'todo' || currentStatus === 'pending'))
+    if (statusChanged) {
       handleStatusChange(dragTaskId, targetStatus)
-      setDragTaskId(null)
     }
+
+    // Update group if different
+    if (targetGroupId !== undefined && task.group_id !== targetGroupId) {
+      try {
+        await api.tasks.update(dragTaskId, { group_id: targetGroupId ?? null })
+        setTasks(prev => prev.map(t => t.id === dragTaskId ? { ...t, group_id: targetGroupId ?? null } : t))
+      } catch (err) {
+        console.error('Failed to update task group:', err)
+      }
+    }
+
+    setDragTaskId(null)
   }
 
   /* ── Grouped Tasks ──────────────────────────── */
@@ -510,7 +529,7 @@ export default function ProjectDetail() {
           <div
             key={col.key}
             onDragOver={handleDragOver}
-            onDrop={e => handleDrop(e, col.key)}
+            onDrop={e => handleDrop(e, col.key, groupId)}
             style={{
               flex: '1 0 200px', minWidth: 200, maxWidth: 280,
               background: '#f8fafc', borderRadius: 12,
