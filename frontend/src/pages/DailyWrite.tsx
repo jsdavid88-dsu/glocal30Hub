@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '../api/client'
 
 type TaskStatus = '진행중' | '새로' | '완료' | '블로킹'
+type SectionType = 'progress' | 'issue' | 'plan' | 'misc'
+type VisibilityType = 'private' | 'advisor' | 'internal' | 'project'
 
 interface UploadedFile {
   id: string
@@ -18,7 +20,17 @@ interface AssignedTask {
   status: TaskStatus
   url?: string
   guide?: string
+  project_id?: number
 }
+
+interface ProjectOption {
+  id: number
+  name: string
+  code: string
+}
+
+const DRAFT_STORAGE_KEY = 'dailyWrite_draft'
+const AUTOSAVE_INTERVAL = 30000 // 30 seconds
 
 const defaultMockTasks: AssignedTask[] = [
   {
@@ -49,7 +61,14 @@ const statusConfig: Record<TaskStatus, { bg: string; color: string }> = {
   '블로킹': { bg: '#ffe4e6', color: '#be123c' },
 }
 
-const visibilityOptions = [
+const sectionOptions: { key: SectionType; label: string }[] = [
+  { key: 'progress', label: '진행 상황' },
+  { key: 'issue', label: '이슈/논의' },
+  { key: 'plan', label: '계획' },
+  { key: 'misc', label: '기타' },
+]
+
+const visibilityOptions: { key: VisibilityType; label: string }[] = [
   { key: 'private', label: '나만 보기' },
   { key: 'advisor', label: '지도교수 공개' },
   { key: 'internal', label: '내부 공개' },
@@ -61,6 +80,43 @@ const cardStyle = {
   border: '1px solid #e2e8f0',
   borderRadius: '16px',
   boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)',
+}
+
+// ── Small inline dropdown ──
+function SmallSelect<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T
+  options: { key: T; label: string }[]
+  onChange: (v: T) => void
+}) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' as const }}>{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as T)}
+        style={{
+          padding: '3px 6px',
+          borderRadius: 6,
+          border: '1px solid #e2e8f0',
+          fontSize: 11,
+          color: '#475569',
+          background: '#f8fafc',
+          outline: 'none',
+          cursor: 'pointer',
+        }}
+      >
+        {options.map((o) => (
+          <option key={o.key} value={o.key}>{o.label}</option>
+        ))}
+      </select>
+    </div>
+  )
 }
 
 function FileAttachmentZone({
@@ -224,13 +280,81 @@ function FileAttachmentZone({
   )
 }
 
+// ── Draft shape for localStorage ──
+interface DraftData {
+  taskStatuses: Record<number, TaskStatus>
+  taskProgress: Record<number, string>
+  taskSections: Record<number, SectionType>
+  taskVisibilities: Record<number, VisibilityType>
+  taskProjectIds: Record<number, number | null>
+  memoContent: string
+  memoVisibility: string
+  memoSection: SectionType
+  memoProjectId: number | null
+  tags: string[]
+  savedAt: string // ISO string
+}
+
 export default function DailyWrite() {
   const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
 
   const [tasks, setTasks] = useState<AssignedTask[]>(defaultMockTasks)
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
+  const [projects, setProjects] = useState<ProjectOption[]>([])
+  const [draftIndicator, setDraftIndicator] = useState<string | null>(null)
+  const [showDraftRestore, setShowDraftRestore] = useState(false)
 
+  // Per-block settings
+  const [taskStatuses, setTaskStatuses] = useState<Record<number, TaskStatus>>(
+    Object.fromEntries(defaultMockTasks.map((t) => [t.id, t.status]))
+  )
+  const [taskProgress, setTaskProgress] = useState<Record<number, string>>(
+    Object.fromEntries(defaultMockTasks.map((t) => [t.id, '']))
+  )
+  const [taskSections, setTaskSections] = useState<Record<number, SectionType>>(
+    Object.fromEntries(defaultMockTasks.map((t) => [t.id, 'progress' as SectionType]))
+  )
+  const [taskVisibilities, setTaskVisibilities] = useState<Record<number, VisibilityType>>(
+    Object.fromEntries(defaultMockTasks.map((t) => [t.id, 'advisor' as VisibilityType]))
+  )
+  const [taskProjectIds, setTaskProjectIds] = useState<Record<number, number | null>>(
+    Object.fromEntries(defaultMockTasks.map((t) => [t.id, null]))
+  )
+
+  // Memo block settings
+  const [memoContent, setMemoContent] = useState('')
+  const [memoVisibility, setMemoVisibility] = useState<VisibilityType>('advisor')
+  const [memoSection, setMemoSection] = useState<SectionType>('misc')
+  const [memoProjectId, setMemoProjectId] = useState<number | null>(null)
+
+  // Tags
+  const [tags, setTags] = useState<string[]>([])
+  const [tagInput, setTagInput] = useState('')
+
+  // File attachments per task and memo
+  const [taskFiles, setTaskFiles] = useState<Record<number, UploadedFile[]>>({})
+  const [memoFiles, setMemoFiles] = useState<UploadedFile[]>([])
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null)
+
+  // ── Fetch projects ──
+  useEffect(() => {
+    (async () => {
+      try {
+        const res: any = await api.projects.list()
+        const items = Array.isArray(res) ? res : (res?.data || [])
+        setProjects(items.map((p: any) => ({
+          id: p.id,
+          name: p.name || p.title || '',
+          code: p.code || '',
+        })))
+      } catch {
+        // Backend not available
+      }
+    })()
+  }, [])
+
+  // ── Fetch tasks ──
   useEffect(() => {
     (async () => {
       try {
@@ -249,6 +373,7 @@ export default function DailyWrite() {
             status: statusMap[t.status] || '새로',
             url: t.url || t.reference_url || undefined,
             guide: t.guide || t.description || undefined,
+            project_id: t.project_id || undefined,
           }))
           setTasks(mapped)
         }
@@ -258,23 +383,117 @@ export default function DailyWrite() {
     })()
   }, [])
 
-  const [taskStatuses, setTaskStatuses] = useState<Record<number, TaskStatus>>(
-    Object.fromEntries(defaultMockTasks.map((t) => [t.id, t.status]))
-  )
-  const [taskProgress, setTaskProgress] = useState<Record<number, string>>(
-    Object.fromEntries(defaultMockTasks.map((t) => [t.id, '']))
-  )
-
   // Re-initialize statuses when tasks change from API
   useEffect(() => {
     setTaskStatuses(Object.fromEntries(tasks.map((t) => [t.id, t.status])))
     setTaskProgress(Object.fromEntries(tasks.map((t) => [t.id, ''])))
+    setTaskSections(Object.fromEntries(tasks.map((t) => [t.id, 'progress' as SectionType])))
+    setTaskVisibilities(Object.fromEntries(tasks.map((t) => [t.id, 'advisor' as VisibilityType])))
+    setTaskProjectIds(Object.fromEntries(tasks.map((t) => [t.id, t.project_id ?? null])))
   }, [tasks])
 
-  // File attachments per task and memo
-  const [taskFiles, setTaskFiles] = useState<Record<number, UploadedFile[]>>({})
-  const [memoFiles, setMemoFiles] = useState<UploadedFile[]>([])
-  const [uploadingFor, setUploadingFor] = useState<string | null>(null)
+  // ── Draft: check for existing draft on mount ──
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+      if (raw) {
+        const draft: DraftData = JSON.parse(raw)
+        // Only offer restore if draft is from today
+        const draftDate = new Date(draft.savedAt).toISOString().split('T')[0]
+        const todayISO = new Date().toISOString().split('T')[0]
+        if (draftDate === todayISO) {
+          setShowDraftRestore(true)
+        } else {
+          // Old draft, remove it
+          localStorage.removeItem(DRAFT_STORAGE_KEY)
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const restoreDraft = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+      if (!raw) return
+      const draft: DraftData = JSON.parse(raw)
+      // Restore per-task data (only for tasks that exist)
+      const taskIds = new Set(tasks.map(t => t.id))
+      const filteredStatuses: Record<number, TaskStatus> = {}
+      const filteredProgress: Record<number, string> = {}
+      const filteredSections: Record<number, SectionType> = {}
+      const filteredVisibilities: Record<number, VisibilityType> = {}
+      const filteredProjectIds: Record<number, number | null> = {}
+      for (const t of tasks) {
+        filteredStatuses[t.id] = draft.taskStatuses?.[t.id] ?? t.status
+        filteredProgress[t.id] = draft.taskProgress?.[t.id] ?? ''
+        filteredSections[t.id] = draft.taskSections?.[t.id] ?? 'progress'
+        filteredVisibilities[t.id] = draft.taskVisibilities?.[t.id] ?? 'advisor'
+        filteredProjectIds[t.id] = draft.taskProjectIds?.[t.id] ?? (t.project_id ?? null)
+      }
+      setTaskStatuses(filteredStatuses)
+      setTaskProgress(filteredProgress)
+      setTaskSections(filteredSections)
+      setTaskVisibilities(filteredVisibilities)
+      setTaskProjectIds(filteredProjectIds)
+      setMemoContent(draft.memoContent || '')
+      setMemoVisibility((draft.memoVisibility as VisibilityType) || 'advisor')
+      setMemoSection(draft.memoSection || 'misc')
+      setMemoProjectId(draft.memoProjectId ?? null)
+      setTags(draft.tags || [])
+      const savedTime = new Date(draft.savedAt)
+      setDraftIndicator(`임시저장됨 ${savedTime.getHours().toString().padStart(2, '0')}:${savedTime.getMinutes().toString().padStart(2, '0')}`)
+    } catch {
+      // ignore
+    }
+    setShowDraftRestore(false)
+  }, [tasks])
+
+  const dismissDraft = useCallback(() => {
+    localStorage.removeItem(DRAFT_STORAGE_KEY)
+    setShowDraftRestore(false)
+  }, [])
+
+  // Build draft data
+  const buildDraft = useCallback((): DraftData => {
+    return {
+      taskStatuses,
+      taskProgress,
+      taskSections,
+      taskVisibilities,
+      taskProjectIds,
+      memoContent,
+      memoVisibility,
+      memoSection,
+      memoProjectId,
+      tags,
+      savedAt: new Date().toISOString(),
+    }
+  }, [taskStatuses, taskProgress, taskSections, taskVisibilities, taskProjectIds, memoContent, memoVisibility, memoSection, memoProjectId, tags])
+
+  const saveDraftToStorage = useCallback(() => {
+    try {
+      const draft = buildDraft()
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft))
+      const now = new Date()
+      setDraftIndicator(`임시저장됨 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`)
+    } catch {
+      // ignore
+    }
+  }, [buildDraft])
+
+  // ── Auto-save every 30 seconds ──
+  useEffect(() => {
+    const timer = setInterval(() => {
+      // Only auto-save if there's any content
+      const hasContent = Object.values(taskProgress).some(v => v.trim()) || memoContent.trim()
+      if (hasContent) {
+        saveDraftToStorage()
+      }
+    }, AUTOSAVE_INTERVAL)
+    return () => clearInterval(timer)
+  }, [saveDraftToStorage, taskProgress, memoContent])
 
   const handleFileUpload = useCallback(async (files: FileList | null, target: string, taskId?: number) => {
     if (!files || files.length === 0) return
@@ -320,11 +539,6 @@ export default function DailyWrite() {
     }
   }, [])
 
-  const [memoContent, setMemoContent] = useState('')
-  const [memoVisibility, setMemoVisibility] = useState('advisor')
-  const [tags, setTags] = useState<string[]>([])
-  const [tagInput, setTagInput] = useState('')
-
   const handleAddTag = () => {
     const trimmed = tagInput.trim()
     if (trimmed && !tags.includes(trimmed)) {
@@ -353,13 +567,108 @@ export default function DailyWrite() {
       nextStatus = order[(idx + 1) % order.length]
       return { ...prev, [taskId]: nextStatus }
     })
-    // Persist to backend
     try {
       await api.tasks.updateStatus(String(taskId), statusToApi[nextStatus])
     } catch {
-      // Silently ignore if backend is unavailable — local state still updated
+      // Silently ignore if backend is unavailable
     }
   }
+
+  // ── Build blocks and save ──
+  const handleSave = async (isFinal: boolean) => {
+    setSaving(true)
+    setSaveMessage('')
+    try {
+      const todayISO = new Date().toISOString().split('T')[0]
+      const taskLines = tasks
+        .filter(t => taskProgress[t.id]?.trim())
+        .map(t => `[${taskStatuses[t.id]}] ${t.title}: ${taskProgress[t.id]}`)
+      const rawContent = [...taskLines, memoContent.trim()].filter(Boolean).join('\n\n')
+      const log: any = await api.daily.create({ date: todayISO, raw_content: rawContent })
+
+      // Resolve tag names to IDs (create if needed)
+      const tagIds: number[] = []
+      for (const tagName of tags) {
+        try {
+          const created: any = await api.tags.create({ name: tagName })
+          if (created?.id) tagIds.push(created.id)
+        } catch {
+          // Tag may already exist; try listing
+          try {
+            const list: any = await api.tags.list({ name: tagName })
+            const items = Array.isArray(list) ? list : (list?.data || [])
+            const found = items.find((t: any) => t.name === tagName)
+            if (found?.id) tagIds.push(found.id)
+          } catch {
+            // skip
+          }
+        }
+      }
+
+      let blockOrder = 0
+      const blocks: any[] = []
+      tasks.filter(t => taskProgress[t.id]?.trim()).forEach(t => {
+        const block: any = {
+          content: `[${taskStatuses[t.id]}] ${t.title}\n${taskProgress[t.id]}`,
+          block_order: blockOrder++,
+          section: taskSections[t.id] || 'progress',
+          visibility: taskVisibilities[t.id] || 'advisor',
+        }
+        if (taskProjectIds[t.id]) {
+          block.project_id = taskProjectIds[t.id]
+        }
+        if (tagIds.length > 0) {
+          block.tag_ids = tagIds
+        }
+        // Associate uploaded files
+        const files = taskFiles[t.id]
+        if (files && files.length > 0) {
+          block.file_ids = files.map(f => f.id)
+        }
+        blocks.push(block)
+      })
+      if (memoContent.trim()) {
+        const memoBlock: any = {
+          content: memoContent,
+          block_order: blockOrder++,
+          section: memoSection,
+          visibility: memoVisibility,
+        }
+        if (memoProjectId) {
+          memoBlock.project_id = memoProjectId
+        }
+        if (tagIds.length > 0) {
+          memoBlock.tag_ids = tagIds
+        }
+        if (memoFiles.length > 0) {
+          memoBlock.file_ids = memoFiles.map(f => f.id)
+        }
+        blocks.push(memoBlock)
+      }
+      if (log?.id && blocks.length > 0) {
+        await api.daily.createBlocks(String(log.id), blocks)
+      }
+      if (isFinal) {
+        // Clear draft on final save
+        localStorage.removeItem(DRAFT_STORAGE_KEY)
+        setDraftIndicator(null)
+        setSaveMessage('최종 저장 완료')
+      } else {
+        saveDraftToStorage()
+        setSaveMessage('임시 저장 완료')
+      }
+    } catch {
+      setSaveMessage('저장 실패 (서버 연결 확인)')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Project selector options including "없음"
+  const projectSelectOptions: { key: string; label: string }[] = [
+    { key: '', label: '프로젝트 없음' },
+    ...projects.map(p => ({ key: String(p.id), label: p.name || p.code })),
+  ]
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
@@ -368,8 +677,59 @@ export default function DailyWrite() {
         <h1 style={{ fontSize: 26, fontWeight: 600, color: '#0f172a', fontFamily: 'var(--font-display)' }}>
           오늘의 데일리
         </h1>
-        <p style={{ color: '#64748b', fontSize: 15, marginTop: 6 }}>{today}</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+          <p style={{ color: '#64748b', fontSize: 15 }}>{today}</p>
+          {draftIndicator && (
+            <span style={{
+              fontSize: 11, color: '#4f46e5', fontWeight: 500,
+              padding: '2px 8px', borderRadius: 6, background: '#eef2ff',
+            }}>
+              {draftIndicator}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* Draft restore banner */}
+      {showDraftRestore && (
+        <div style={{
+          ...cardStyle,
+          padding: '14px 20px',
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: '#fffbeb',
+          border: '1px solid #fde68a',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span style={{ fontSize: 13, color: '#92400e' }}>이전에 작성하던 임시저장 데이터가 있습니다.</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={restoreDraft}
+              style={{
+                padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer',
+              }}
+            >
+              복원
+            </button>
+            <button
+              onClick={dismissDraft}
+              style={{
+                padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500,
+                background: '#fff', color: '#64748b', border: '1px solid #e2e8f0', cursor: 'pointer',
+              }}
+            >
+              삭제
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gap: 24 }}>
         {/* Assigned Tasks Section */}
@@ -448,6 +808,33 @@ export default function DailyWrite() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Per-block selectors: project, section, visibility */}
+                    {!isCompleted && (
+                      <div style={{
+                        display: 'flex', gap: 12, flexWrap: 'wrap' as const,
+                        marginTop: 10, paddingLeft: 4,
+                      }}>
+                        <SmallSelect
+                          label="프로젝트"
+                          value={String(taskProjectIds[task.id] ?? '')}
+                          options={projectSelectOptions as any}
+                          onChange={(v) => setTaskProjectIds(prev => ({ ...prev, [task.id]: v ? Number(v) : null }))}
+                        />
+                        <SmallSelect
+                          label="섹션"
+                          value={taskSections[task.id] || 'progress'}
+                          options={sectionOptions}
+                          onChange={(v) => setTaskSections(prev => ({ ...prev, [task.id]: v as SectionType }))}
+                        />
+                        <SmallSelect
+                          label="공개"
+                          value={taskVisibilities[task.id] || 'advisor'}
+                          options={visibilityOptions}
+                          onChange={(v) => setTaskVisibilities(prev => ({ ...prev, [task.id]: v as VisibilityType }))}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Progress textarea + file attachment */}
@@ -515,8 +902,49 @@ export default function DailyWrite() {
             />
           </div>
 
-          {/* Visibility + Tags */}
+          {/* Memo block selectors + Visibility + Tags */}
           <div style={{ padding: '0 28px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Per-block selectors for memo */}
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#64748b', marginBottom: 6 }}>
+                  프로젝트
+                </label>
+                <select
+                  value={String(memoProjectId ?? '')}
+                  onChange={(e) => setMemoProjectId(e.target.value ? Number(e.target.value) : null)}
+                  style={{
+                    padding: '6px 12px', borderRadius: 8, fontSize: 12,
+                    border: '1px solid #e2e8f0', color: '#475569',
+                    background: '#fff', outline: 'none', cursor: 'pointer',
+                  }}
+                >
+                  <option value="">프로젝트 없음</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={String(p.id)}>{p.name || p.code}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#64748b', marginBottom: 6 }}>
+                  섹션
+                </label>
+                <select
+                  value={memoSection}
+                  onChange={(e) => setMemoSection(e.target.value as SectionType)}
+                  style={{
+                    padding: '6px 12px', borderRadius: 8, fontSize: 12,
+                    border: '1px solid #e2e8f0', color: '#475569',
+                    background: '#fff', outline: 'none', cursor: 'pointer',
+                  }}
+                >
+                  {sectionOptions.map(o => (
+                    <option key={o.key} value={o.key}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {/* Visibility */}
             <div>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#64748b', marginBottom: 6 }}>
@@ -597,7 +1025,7 @@ export default function DailyWrite() {
 
         {/* Action Buttons */}
         <div className="opacity-0 animate-fade-in stagger-3" style={{
-          display: 'flex', gap: 10, justifyContent: 'flex-end', paddingBottom: 32,
+          display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 32,
         }}>
           {saveMessage && (
             <span style={{ fontSize: 13, color: saveMessage.includes('실패') ? '#be123c' : '#047857', alignSelf: 'center' }}>
@@ -606,47 +1034,7 @@ export default function DailyWrite() {
           )}
           <button
             disabled={saving}
-            onClick={async () => {
-              setSaving(true)
-              setSaveMessage('')
-              try {
-                const todayISO = new Date().toISOString().split('T')[0]
-                // Build raw_content summary for the log
-                const taskLines = tasks
-                  .filter(t => taskProgress[t.id]?.trim())
-                  .map(t => `[${taskStatuses[t.id]}] ${t.title}: ${taskProgress[t.id]}`)
-                const rawContent = [...taskLines, memoContent.trim()].filter(Boolean).join('\n\n')
-                // Create the daily log (draft)
-                const log: any = await api.daily.create({ date: todayISO, raw_content: rawContent })
-                // Build blocks with proper schema
-                let blockOrder = 0
-                const blocks: any[] = []
-                tasks.filter(t => taskProgress[t.id]?.trim()).forEach(t => {
-                  blocks.push({
-                    content: `[${taskStatuses[t.id]}] ${t.title}\n${taskProgress[t.id]}`,
-                    block_order: blockOrder++,
-                    section: 'today',
-                    visibility: 'advisor',
-                  })
-                })
-                if (memoContent.trim()) {
-                  blocks.push({
-                    content: memoContent,
-                    block_order: blockOrder++,
-                    section: 'misc',
-                    visibility: memoVisibility,
-                  })
-                }
-                if (log?.id && blocks.length > 0) {
-                  await api.daily.createBlocks(String(log.id), blocks)
-                }
-                setSaveMessage('임시 저장 완료')
-              } catch {
-                setSaveMessage('저장 실패 (서버 연결 확인)')
-              } finally {
-                setSaving(false)
-              }
-            }}
+            onClick={() => saveDraftToStorage()}
             style={{
               padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 500,
               background: '#f1f5f9', color: '#475569', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
@@ -657,47 +1045,18 @@ export default function DailyWrite() {
           </button>
           <button
             disabled={saving}
-            onClick={async () => {
-              setSaving(true)
-              setSaveMessage('')
-              try {
-                const todayISO = new Date().toISOString().split('T')[0]
-                // Build raw_content summary for the log
-                const taskLines = tasks
-                  .filter(t => taskProgress[t.id]?.trim())
-                  .map(t => `[${taskStatuses[t.id]}] ${t.title}: ${taskProgress[t.id]}`)
-                const rawContent = [...taskLines, memoContent.trim()].filter(Boolean).join('\n\n')
-                // Create the daily log (final submit)
-                const log: any = await api.daily.create({ date: todayISO, raw_content: rawContent })
-                // Build blocks with proper schema
-                let blockOrder = 0
-                const blocks: any[] = []
-                tasks.filter(t => taskProgress[t.id]?.trim()).forEach(t => {
-                  blocks.push({
-                    content: `[${taskStatuses[t.id]}] ${t.title}\n${taskProgress[t.id]}`,
-                    block_order: blockOrder++,
-                    section: 'today',
-                    visibility: 'advisor',
-                  })
-                })
-                if (memoContent.trim()) {
-                  blocks.push({
-                    content: memoContent,
-                    block_order: blockOrder++,
-                    section: 'misc',
-                    visibility: memoVisibility,
-                  })
-                }
-                if (log?.id && blocks.length > 0) {
-                  await api.daily.createBlocks(String(log.id), blocks)
-                }
-                setSaveMessage('최종 저장 완료')
-              } catch {
-                setSaveMessage('저장 실패 (서버 연결 확인)')
-              } finally {
-                setSaving(false)
-              }
+            onClick={() => handleSave(false)}
+            style={{
+              padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 500,
+              background: '#f1f5f9', color: '#475569', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.6 : 1,
             }}
+          >
+            서버 임시저장
+          </button>
+          <button
+            disabled={saving}
+            onClick={() => handleSave(true)}
             style={{
               padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 600,
               background: '#4f46e5', color: '#fff', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',

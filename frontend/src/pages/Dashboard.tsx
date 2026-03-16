@@ -1,34 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRole, type Role } from '../contexts/RoleContext'
 import { api } from '../api/client'
 
 // ─── Types ───
 type StudentRow = { name: string; type: string; project: string; dailyStatus: string; attendance: string }
 type TaskRow = { title: string; project: string; status: '완료' | '진행중' | '미시작'; url: string; guide: string }
-
-// ─── MOCK DATA: Replace with real API calls when endpoints are ready ───
-
-// MOCK DATA — TODO Phase 3: Replace with notifications/issues API
-const professorIssues = [
-  { student: '윤스마', issue: 'GPU 서버 접근 권한 요청', time: '2시간 전', urgent: true },
-  { student: '정인턴', issue: '중간발표 자료 리뷰 요청', time: '5시간 전', urgent: false },
-  { student: '한감성', issue: 'Diffusion 모델 OOM 이슈 논의 필요', time: '1일 전', urgent: true },
-  { student: '송리서', issue: '출결 관련 상담 요청', time: '1일 전', urgent: false },
-]
-
-// MOCK DATA — TODO Phase 3: Connect to events API (endpoint exists but router not mounted yet)
-const professorMilestones = [
-  { title: 'KOCCA Phase 2 중간보고', project: 'KOCCA AI Animation', date: '2026-03-15', daysLeft: 4 },
-  { title: 'NRF 연차보고서 제출', project: 'NRF GCA', date: '2026-03-20', daysLeft: 9 },
-  { title: 'Digital Heritage 최종 납품', project: 'Digital Heritage Archive', date: '2026-03-31', daysLeft: 20 },
-]
-
-// MOCK DATA — TODO Phase 3: Replace with events API (calendar events for today)
-const studentSchedule = [
-  { time: '10:00', title: 'KOCCA 주간 미팅', type: '회의' },
-  { time: '14:00', title: '지도교수 면담', type: '면담' },
-  { time: '16:00', title: 'GPU 서버 점검', type: '작업' },
-]
+type IssueItem = { student: string; issue: string; time: string; urgent: boolean }
+type MilestoneItem = { title: string; project: string; date: string; daysLeft: number }
+type ScheduleItem = { time: string; title: string; type: string }
 
 // ─── Shared Styles ───
 const cardStyle: React.CSSProperties = {
@@ -95,6 +74,26 @@ const taskStatusBadge = (status: '완료' | '진행중' | '미시작') => {
   return badgeStyle('#f1f5f9', 'var(--color-text-muted)')
 }
 
+// ─── Helpers ───
+function timeAgo(dateStr: string): string {
+  const now = new Date()
+  const date = new Date(dateStr)
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 60) return `${diffMin}분 전`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}시간 전`
+  const diffDay = Math.floor(diffHr / 24)
+  return `${diffDay}일 전`
+}
+
+function daysUntil(dateStr: string): number {
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  const target = new Date(dateStr)
+  target.setHours(0, 0, 0, 0)
+  return Math.max(0, Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+}
 
 // ─── Main Component ───
 export default function Dashboard() {
@@ -155,6 +154,8 @@ export default function Dashboard() {
 function ProfessorView() {
   const [students, setStudents] = useState<StudentRow[]>([])
   const [taskSummary, setTaskSummary] = useState({ done: 0, inProgress: 0, notStarted: 0 })
+  const [issues, setIssues] = useState<IssueItem[]>([])
+  const [milestones, setMilestones] = useState<MilestoneItem[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -163,26 +164,71 @@ function ProfessorView() {
     Promise.all([
       api.users.list({ role: 'student' }).catch(() => null),
       api.tasks.my().catch(() => null),
-      // Fetch today's daily logs to determine submission status
       api.daily.list({ date_from: today, date_to: today }).catch(() => null),
-    ]).then(([apiStudents, apiTasks, apiDailyLogs]) => {
+      api.attendance.students({ date: today }).catch(() => null),
+      api.events.list({ date_from: today }).catch(() => null),
+    ]).then(([apiStudents, apiTasks, apiDailyLogs, apiAttendance, apiEvents]) => {
       // Collect author IDs who submitted daily logs today
       const dailyLogEntries: any[] = (apiDailyLogs as any)?.data || []
       const submittedAuthorIds = new Set(dailyLogEntries.map((log: any) => log.author_id || log.author?.id))
 
-      // Map students: response shape is { data: UserSummaryResponse[], meta: dict }
+      // Build attendance lookup: student_id -> status
+      const attendanceList: any[] = (apiAttendance as any)?.data || []
+      const attendanceMap = new Map<string, string>()
+      for (const rec of attendanceList) {
+        const sid = rec.user_id || rec.student_id || rec.id
+        if (rec.check_in_time && rec.is_late) {
+          attendanceMap.set(sid, '지각')
+        } else if (rec.check_in_time) {
+          attendanceMap.set(sid, '출근')
+        }
+      }
+
+      // Extract issues from daily logs (blocks with section='issue')
+      const issueItems: IssueItem[] = []
+      for (const log of dailyLogEntries) {
+        const blocks: any[] = log.blocks || []
+        for (const block of blocks) {
+          if (block.section === 'issue' || block.block_type === 'issue') {
+            issueItems.push({
+              student: log.author?.name || log.author_name || '학생',
+              issue: block.content || block.text || '',
+              time: timeAgo(log.created_at || log.date || today),
+              urgent: block.urgent === true || block.priority === 'high',
+            })
+          }
+        }
+      }
+      setIssues(issueItems)
+
+      // Build milestones from events
+      const eventItems: any[] = (apiEvents as any)?.data || []
+      const milestoneItems: MilestoneItem[] = eventItems
+        .filter((ev: any) => ev.date || ev.start_date || ev.end_date)
+        .map((ev: any) => {
+          const eventDate = ev.date || ev.start_date || ev.end_date || ''
+          return {
+            title: ev.title || ev.name || '',
+            project: ev.project_name || ev.project?.name || '',
+            date: eventDate,
+            daysLeft: daysUntil(eventDate),
+          }
+        })
+        .sort((a: MilestoneItem, b: MilestoneItem) => a.daysLeft - b.daysLeft)
+        .slice(0, 5)
+      setMilestones(milestoneItems)
+
+      // Map students
       const rawStudents: any[] = (apiStudents as any)?.data || []
       setStudents(rawStudents.map((s: any) => ({
         name: s.name || '',
         type: '지도학생',
         project: s.major_field || '',
-        // Real daily submission status from daily-logs API
         dailyStatus: submittedAuthorIds.has(s.id) ? '제출' : '미제출',
-        // TODO Phase 3: Replace with attendance API
-        attendance: '미출근',
+        attendance: attendanceMap.get(s.id) || '미출근',
       })))
 
-      // Map tasks: response shape is { data: TaskSummaryResponse[], meta: dict }
+      // Map tasks
       const rawTasks: any[] = (apiTasks as any)?.data || []
       const done = rawTasks.filter((t: any) => t.status === 'done' || t.status === 'completed').length
       const inProgress = rawTasks.filter((t: any) => t.status === 'in_progress').length
@@ -337,7 +383,11 @@ function ProfessorView() {
                 <p style={sectionSubtitleStyle}>빠른 확인 필요</p>
               </div>
               <div style={{ padding: '12px' }}>
-                {professorIssues.map((item, i) => (
+                {issues.length === 0 ? (
+                  <div style={{ padding: '24px 14px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+                    보고된 이슈가 없습니다.
+                  </div>
+                ) : issues.map((item, i) => (
                   <div
                     key={i}
                     style={{
@@ -379,7 +429,11 @@ function ProfessorView() {
                 <p style={sectionSubtitleStyle}>일정 관리</p>
               </div>
               <div style={{ padding: '12px' }}>
-                {professorMilestones.map((item, i) => (
+                {milestones.length === 0 ? (
+                  <div style={{ padding: '24px 14px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+                    예정된 마일스톤이 없습니다.
+                  </div>
+                ) : milestones.map((item, i) => (
                   <div
                     key={i}
                     style={{
@@ -420,33 +474,111 @@ function StudentView() {
   const [tasks, setTasks] = useState<TaskRow[]>([])
   const [weeklyProgress, setWeeklyProgress] = useState({ done: 0, total: 0 })
   const [loading, setLoading] = useState(true)
+  const [schedule, setSchedule] = useState<ScheduleItem[]>([])
+  const [attendanceStatus, setAttendanceStatus] = useState<{
+    checkedIn: boolean; checkedOut: boolean; checkInTime: string | null
+  }>({ checkedIn: false, checkedOut: false, checkInTime: null })
+  const [dailyWritten, setDailyWritten] = useState(false)
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
 
   useEffect(() => {
-    api.tasks.my()
-      .then((apiTasks: any) => {
-        // Response shape: { data: TaskSummaryResponse[], meta: dict }
-        const items: any[] = apiTasks?.data || []
-        const statusMap: Record<string, '완료' | '진행중' | '미시작'> = {
-          done: '완료', completed: '완료',
-          in_progress: '진행중',
-          not_started: '미시작', new: '미시작',
+    const today = new Date().toISOString().slice(0, 10)
+
+    Promise.all([
+      api.tasks.my().catch(() => null),
+      api.events.list({ date_from: today, date_to: today }).catch(() => null),
+      api.attendance.today().catch(() => null),
+      api.daily.list({ date_from: today, date_to: today }).catch(() => null),
+    ]).then(([apiTasks, apiEvents, apiAttendance, apiDailyLogs]) => {
+      // Tasks
+      const items: any[] = (apiTasks as any)?.data || []
+      const statusMap: Record<string, '완료' | '진행중' | '미시작'> = {
+        done: '완료', completed: '완료',
+        in_progress: '진행중',
+        not_started: '미시작', new: '미시작',
+      }
+      const mapped: TaskRow[] = items.map((t: any) => ({
+        title: t.title || '',
+        project: '',
+        status: statusMap[t.status] || '미시작',
+        url: '',
+        guide: t.description || '',
+      }))
+      setTasks(mapped)
+      const done = mapped.filter(t => t.status === '완료').length
+      setWeeklyProgress({ done, total: mapped.length })
+
+      // Schedule from events
+      const eventItems: any[] = (apiEvents as any)?.data || []
+      const scheduleItems: ScheduleItem[] = eventItems.map((ev: any) => {
+        const startTime = ev.start_time || ev.time || ''
+        // Extract HH:MM from datetime or time string
+        let displayTime = ''
+        if (startTime) {
+          const timePart = startTime.includes('T') ? startTime.split('T')[1] : startTime
+          displayTime = timePart.slice(0, 5)
         }
-        const mapped: TaskRow[] = items.map((t: any) => ({
-          title: t.title || '',
-          project: '',
-          status: statusMap[t.status] || '미시작',
-          url: '',
-          guide: t.description || '',
-        }))
-        setTasks(mapped)
-        const done = mapped.filter(t => t.status === '완료').length
-        setWeeklyProgress({ done, total: mapped.length })
-      })
-      .catch(() => {
-        setTasks([])
-        setWeeklyProgress({ done: 0, total: 0 })
-      })
-      .finally(() => setLoading(false))
+        return {
+          time: displayTime,
+          title: ev.title || ev.name || '',
+          type: ev.event_type || ev.type || ev.category || '',
+        }
+      }).sort((a: ScheduleItem, b: ScheduleItem) => a.time.localeCompare(b.time))
+      setSchedule(scheduleItems)
+
+      // Attendance today
+      const attData = apiAttendance as any
+      if (attData) {
+        const checkIn = attData.check_in_time || attData.check_in || null
+        const checkOut = attData.check_out_time || attData.check_out || null
+        let checkInDisplay: string | null = null
+        if (checkIn) {
+          const timePart = typeof checkIn === 'string' && checkIn.includes('T')
+            ? checkIn.split('T')[1] : checkIn
+          checkInDisplay = typeof timePart === 'string' ? timePart.slice(0, 5) : checkIn
+        }
+        setAttendanceStatus({
+          checkedIn: !!checkIn,
+          checkedOut: !!checkOut,
+          checkInTime: checkInDisplay,
+        })
+      }
+
+      // Daily log check
+      const dailyEntries: any[] = (apiDailyLogs as any)?.data || []
+      setDailyWritten(dailyEntries.length > 0)
+    }).catch(() => {
+      setTasks([])
+      setWeeklyProgress({ done: 0, total: 0 })
+    }).finally(() => setLoading(false))
+  }, [])
+
+  const handleCheckIn = useCallback(async () => {
+    setAttendanceLoading(true)
+    try {
+      const res = await api.attendance.checkIn() as any
+      const checkIn = res?.check_in_time || res?.check_in || new Date().toISOString()
+      const timePart = typeof checkIn === 'string' && checkIn.includes('T')
+        ? checkIn.split('T')[1] : checkIn
+      const checkInDisplay = typeof timePart === 'string' ? timePart.slice(0, 5) : checkIn
+      setAttendanceStatus({ checkedIn: true, checkedOut: false, checkInTime: checkInDisplay })
+    } catch {
+      // silently fail — API might not be ready
+    } finally {
+      setAttendanceLoading(false)
+    }
+  }, [])
+
+  const handleCheckOut = useCallback(async () => {
+    setAttendanceLoading(true)
+    try {
+      await api.attendance.checkOut()
+      setAttendanceStatus(prev => ({ ...prev, checkedOut: true }))
+    } catch {
+      // silently fail
+    } finally {
+      setAttendanceLoading(false)
+    }
   }, [])
 
   if (loading) return <div style={{ padding: '48px', color: 'var(--color-text-muted)', textAlign: 'center' }}>로딩 중...</div>
@@ -455,54 +587,96 @@ function StudentView() {
     ? Math.round((weeklyProgress.done / weeklyProgress.total) * 100)
     : 0
 
+  // Determine attendance display text
+  let attendanceText = '아직 출근 전'
+  if (attendanceStatus.checkedIn && attendanceStatus.checkedOut) {
+    attendanceText = `오늘 출근: ${attendanceStatus.checkInTime} | 퇴근 완료`
+  } else if (attendanceStatus.checkedIn) {
+    attendanceText = `오늘 출근: ${attendanceStatus.checkInTime} | 근무중`
+  }
+
   return (
     <div>
       {/* Top row: Attendance + Daily shortcut + Weekly progress */}
       <div className="dash-summary-grid opacity-0 animate-fade-in stagger-1">
-        {/* TODO Phase 3: Attendance — connect to attendance API for real check-in/check-out */}
+        {/* Attendance */}
         <div style={{
           ...cardStyle, padding: '24px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16,
         }}>
           <div>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>출석 체크</h3>
-            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>오늘 출근: 09:12 | 근무중</p>{/* MOCK DATA */}
+            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{attendanceText}</p>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button style={{
-              padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
-              border: 'none', cursor: 'not-allowed',
-              background: '#f1f5f9', color: 'var(--color-text-muted)',
-            }}>
-              출근 완료
-            </button>
-            <button style={{
-              padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
-              border: 'none', cursor: 'pointer',
-              background: 'var(--color-danger)', color: '#fff',
-              boxShadow: '0 2px 8px rgba(220,38,38,0.3)',
-            }}>
-              퇴근하기
-            </button>
+            {!attendanceStatus.checkedIn ? (
+              <button
+                onClick={handleCheckIn}
+                disabled={attendanceLoading}
+                style={{
+                  padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+                  border: 'none', cursor: attendanceLoading ? 'not-allowed' : 'pointer',
+                  background: 'var(--color-accent)', color: '#fff',
+                  boxShadow: '0 2px 8px rgba(79,70,229,0.3)',
+                  opacity: attendanceLoading ? 0.6 : 1,
+                }}
+              >
+                {attendanceLoading ? '처리중...' : '출근하기'}
+              </button>
+            ) : (
+              <button style={{
+                padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+                border: 'none', cursor: 'not-allowed',
+                background: '#f1f5f9', color: 'var(--color-text-muted)',
+              }}>
+                출근 완료
+              </button>
+            )}
+            {attendanceStatus.checkedIn && !attendanceStatus.checkedOut ? (
+              <button
+                onClick={handleCheckOut}
+                disabled={attendanceLoading}
+                style={{
+                  padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+                  border: 'none', cursor: attendanceLoading ? 'not-allowed' : 'pointer',
+                  background: 'var(--color-danger)', color: '#fff',
+                  boxShadow: '0 2px 8px rgba(220,38,38,0.3)',
+                  opacity: attendanceLoading ? 0.6 : 1,
+                }}
+              >
+                {attendanceLoading ? '처리중...' : '퇴근하기'}
+              </button>
+            ) : attendanceStatus.checkedOut ? (
+              <button style={{
+                padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+                border: 'none', cursor: 'not-allowed',
+                background: '#f1f5f9', color: 'var(--color-text-muted)',
+              }}>
+                퇴근 완료
+              </button>
+            ) : null}
           </div>
         </div>
 
-        {/* Daily shortcut — TODO Phase 2a: Check if today's daily log exists via api.daily.list */}
+        {/* Daily shortcut */}
         <div style={{
           ...cardStyle, padding: '24px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16,
         }}>
           <div>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>데일리 작성</h3>
-            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>오늘 아직 미작성</p>{/* MOCK DATA */}
+            <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+              {dailyWritten ? '오늘 데일리 제출 완료' : '오늘 아직 미작성'}
+            </p>
           </div>
           <a href="/daily/write" style={{
             padding: '10px 22px', borderRadius: 12, fontSize: 13, fontWeight: 600,
             border: 'none', cursor: 'pointer', textDecoration: 'none',
-            background: 'var(--color-accent)', color: '#fff',
-            boxShadow: '0 2px 8px rgba(79,70,229,0.3)',
+            background: dailyWritten ? '#f1f5f9' : 'var(--color-accent)',
+            color: dailyWritten ? 'var(--color-text-muted)' : '#fff',
+            boxShadow: dailyWritten ? 'none' : '0 2px 8px rgba(79,70,229,0.3)',
           }}>
-            작성하기
+            {dailyWritten ? '수정하기' : '작성하기'}
           </a>
         </div>
 
@@ -614,15 +788,19 @@ function StudentView() {
           </div>
         </div>
 
-        {/* Right column: Schedule — MOCK DATA, TODO Phase 3: Replace with events API */}
+        {/* Right column: Schedule */}
         <div className="opacity-0 animate-fade-in stagger-3">
           <div style={{ ...cardStyle, overflow: 'hidden' }}>
             <div style={sectionHeaderStyle}>
               <h3 style={sectionTitleStyle}>오늘 일정</h3>
-              <p style={sectionSubtitleStyle}>{studentSchedule.length}건</p>
+              <p style={sectionSubtitleStyle}>{schedule.length}건</p>
             </div>
             <div style={{ padding: 12 }}>
-              {studentSchedule.map((item, i) => (
+              {schedule.length === 0 ? (
+                <div style={{ padding: '24px 14px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+                  오늘 예정된 일정이 없습니다.
+                </div>
+              ) : schedule.map((item, i) => (
                 <div
                   key={i}
                   style={{
@@ -639,13 +817,15 @@ function StudentView() {
                   </span>
                   <div>
                     <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-text-primary)' }}>{item.title}</p>
-                    <span style={{
-                      fontSize: 11, padding: '2px 8px', borderRadius: 6,
-                      background: '#f1f5f9', color: 'var(--color-text-muted)', fontWeight: 500,
-                      display: 'inline-block', marginTop: 4,
-                    }}>
-                      {item.type}
-                    </span>
+                    {item.type && (
+                      <span style={{
+                        fontSize: 11, padding: '2px 8px', borderRadius: 6,
+                        background: '#f1f5f9', color: 'var(--color-text-muted)', fontWeight: 500,
+                        display: 'inline-block', marginTop: 4,
+                      }}>
+                        {item.type}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -726,7 +906,7 @@ function ExternalView() {
               )}
             </div>
 
-            {/* Issues section — TODO Phase 3: Replace with tasks/issues API per project */}
+            {/* Issues section */}
             <div style={{ padding: '12px 28px 20px', borderTop: '1px solid #f1f5f9' }}>
               <p style={{ fontSize: 13, color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
                 이슈 및 태스크 정보는 준비 중입니다.

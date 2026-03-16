@@ -135,4 +135,30 @@ export const api = {
     delete: (id: string) =>
       request(`/notifications/${id}`, { method: 'DELETE' }),
   },
+  // Admin
+  admin: {
+    users: () => request('/admin/users'),
+    updateUserRole: (userId: string, role: string) =>
+      request(`/admin/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+    updateUserStatus: (userId: string, status: string) =>
+      request(`/admin/users/${userId}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    assignAdvisor: (userId: string, advisorId: string) =>
+      request(`/admin/users/${userId}/advisor`, { method: 'POST', body: JSON.stringify({ advisor_id: advisorId }) }),
+    removeAdvisor: (userId: string, advisorId: string) =>
+      request(`/admin/users/${userId}/advisor/${advisorId}`, { method: 'DELETE' }),
+    projects: () => request('/admin/projects'),
+    createProject: (data: any) =>
+      request('/admin/projects', { method: 'POST', body: JSON.stringify(data) }),
+    updateProject: (id: string, data: any) =>
+      request(`/admin/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteProject: (id: string) =>
+      request(`/admin/projects/${id}`, { method: 'DELETE' }),
+    tags: () => request('/admin/tags'),
+    createTag: (data: any) =>
+      request('/admin/tags', { method: 'POST', body: JSON.stringify(data) }),
+    updateTag: (id: string, data: any) =>
+      request(`/admin/tags/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteTag: (id: string) =>
+      request(`/admin/tags/${id}`, { method: 'DELETE' }),
+  },
 };

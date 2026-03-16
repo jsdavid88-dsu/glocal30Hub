@@ -11,6 +11,8 @@ const sectionColors: Record<string, { bg: string; color: string }> = {
   '오늘 할 일': { bg: '#d1fae5', color: '#047857' },
   '이슈/논의': { bg: '#ffe4e6', color: '#be123c' },
   '기타': { bg: '#f1f5f9', color: '#64748b' },
+  '진행 상황': { bg: '#e0e7ff', color: '#4338ca' },
+  '계획': { bg: '#d1fae5', color: '#047857' },
 }
 
 const cardStyle = {
@@ -154,13 +156,15 @@ function CommentInput({
   placeholder = '댓글을 입력하세요...',
   autoFocus = false,
   onCancel,
+  initialText = '',
 }: {
   onSubmit: (content: string, imageUrl?: string) => Promise<void>
   placeholder?: string
   autoFocus?: boolean
   onCancel?: () => void
+  initialText?: string
 }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -367,13 +371,48 @@ function SingleComment({
   comment,
   isReply = false,
   onReply,
+  onEdit,
+  onDelete,
+  currentUserId,
 }: {
   comment: any
   isReply?: boolean
   onReply?: (commentId: string) => void
+  onEdit?: (commentId: string, newContent: string) => Promise<void>
+  onDelete?: (commentId: string) => Promise<void>
+  currentUserId?: string | number | null
 }) {
   const avatarSize = isReply ? 20 : 24
   const fontSize = isReply ? 11 : 12
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState(comment.content || '')
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const isOwn = currentUserId != null && (
+    String(comment.author_id) === String(currentUserId) ||
+    String(comment.user_id) === String(currentUserId)
+  )
+
+  const handleEditSave = async () => {
+    if (!editText.trim() || editSubmitting || !onEdit) return
+    setEditSubmitting(true)
+    try {
+      await onEdit(comment.id, editText.trim())
+      setEditing(false)
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!onDelete) return
+    try {
+      await onDelete(comment.id)
+    } finally {
+      setConfirmDelete(false)
+    }
+  }
 
   return (
     <div style={{
@@ -399,9 +438,52 @@ function SingleComment({
             {comment.created_at ? formatTimeAgo(comment.created_at) : ''}
           </span>
         </div>
-        <p style={{ fontSize, color: '#475569', lineHeight: 1.6, margin: '2px 0 0' }}>
-          {comment.content}
-        </p>
+
+        {editing ? (
+          <div style={{ marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                type="text"
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleEditSave()
+                  if (e.key === 'Escape') { setEditing(false); setEditText(comment.content || '') }
+                }}
+                autoFocus
+                style={{
+                  flex: 1, padding: '5px 10px', border: '1px solid #4f46e5',
+                  borderRadius: 6, fontSize: 12, color: '#0f172a', outline: 'none',
+                  background: '#fff',
+                }}
+              />
+              <button
+                onClick={handleEditSave}
+                disabled={editSubmitting}
+                style={{
+                  padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  background: '#4f46e5', color: '#fff', border: 'none', cursor: 'pointer',
+                }}
+              >
+                {editSubmitting ? '...' : '저장'}
+              </button>
+              <button
+                onClick={() => { setEditing(false); setEditText(comment.content || '') }}
+                style={{
+                  padding: '5px 10px', borderRadius: 6, fontSize: 11,
+                  background: '#f1f5f9', color: '#64748b', border: 'none', cursor: 'pointer',
+                }}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p style={{ fontSize, color: '#475569', lineHeight: 1.6, margin: '2px 0 0' }}>
+            {comment.content}
+          </p>
+        )}
+
         {/* Comment image */}
         {comment.image_url && (
           <a href={comment.image_url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: 6 }}>
@@ -419,26 +501,102 @@ function SingleComment({
             />
           </a>
         )}
-        {/* Reply button (only on top-level comments) */}
-        {!isReply && onReply && (
-          <button
-            onClick={() => onReply(comment.id)}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 3,
-              marginTop: 4, padding: '2px 6px',
-              border: 'none', background: 'transparent',
-              fontSize: 11, color: '#94a3b8', cursor: 'pointer',
-              borderRadius: 4, transition: 'all 0.15s',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = '#4f46e5'; e.currentTarget.style.background = '#f1f5f9' }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'transparent' }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 17 4 12 9 7"/>
-              <path d="M20 18v-2a4 4 0 00-4-4H4"/>
-            </svg>
-            답글
-          </button>
+
+        {/* Action buttons */}
+        {!editing && (
+          <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
+            {/* Reply button (only on top-level comments) */}
+            {!isReply && onReply && (
+              <button
+                onClick={() => onReply(comment.id)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 3,
+                  padding: '2px 6px',
+                  border: 'none', background: 'transparent',
+                  fontSize: 11, color: '#94a3b8', cursor: 'pointer',
+                  borderRadius: 4, transition: 'all 0.15s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#4f46e5'; e.currentTarget.style.background = '#f1f5f9' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'transparent' }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 17 4 12 9 7"/>
+                  <path d="M20 18v-2a4 4 0 00-4-4H4"/>
+                </svg>
+                답글
+              </button>
+            )}
+
+            {/* Edit button (own comments only) */}
+            {isOwn && onEdit && (
+              <button
+                onClick={() => { setEditing(true); setEditText(comment.content || '') }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 3,
+                  padding: '2px 6px',
+                  border: 'none', background: 'transparent',
+                  fontSize: 11, color: '#94a3b8', cursor: 'pointer',
+                  borderRadius: 4, transition: 'all 0.15s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#4f46e5'; e.currentTarget.style.background = '#f1f5f9' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'transparent' }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                수정
+              </button>
+            )}
+
+            {/* Delete button (own comments only) */}
+            {isOwn && onDelete && (
+              confirmDelete ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                  <span style={{ color: '#be123c' }}>삭제?</span>
+                  <button
+                    onClick={handleDelete}
+                    style={{
+                      padding: '1px 6px', border: 'none', background: '#fef2f2',
+                      color: '#be123c', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                      borderRadius: 4,
+                    }}
+                  >
+                    확인
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    style={{
+                      padding: '1px 6px', border: 'none', background: '#f1f5f9',
+                      color: '#64748b', fontSize: 11, cursor: 'pointer',
+                      borderRadius: 4,
+                    }}
+                  >
+                    취소
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 3,
+                    padding: '2px 6px',
+                    border: 'none', background: 'transparent',
+                    fontSize: 11, color: '#94a3b8', cursor: 'pointer',
+                    borderRadius: 4, transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#be123c'; e.currentTarget.style.background = '#fef2f2' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'transparent' }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                  </svg>
+                  삭제
+                </button>
+              )
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -450,7 +608,20 @@ function BlockComments({ blockId }: { blockId: string }) {
   const [comments, setComments] = useState<any[]>([])
   const [commentCount, setCommentCount] = useState(0)
   const [replyTo, setReplyTo] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | number | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Try to get the current user id
+  useEffect(() => {
+    (async () => {
+      try {
+        const me: any = await api.auth.me()
+        if (me?.id) setCurrentUserId(me.id)
+      } catch {
+        // not logged in or API unavailable
+      }
+    })()
+  }, [])
 
   // Count includes replies
   const totalCount = useMemo(() => {
@@ -510,6 +681,48 @@ function BlockComments({ blockId }: { blockId: string }) {
     await refreshComments()
   }
 
+  const handleEditComment = async (commentId: string, newContent: string) => {
+    // Use PATCH on the comment endpoint if available
+    try {
+      const token = localStorage.getItem('token')
+      await fetch(`/api/v1/daily-blocks/${blockId}/comments/${commentId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ content: newContent }),
+      })
+      await refreshComments()
+    } catch {
+      // If endpoint doesn't exist, update locally
+      setComments(prev => prev.map(c =>
+        c.id === commentId ? { ...c, content: newContent } : c
+      ))
+    }
+  }
+
+  const handleDeleteComment = async (commentId: string) => {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`/api/v1/daily-blocks/${blockId}/comments/${commentId}`, {
+        method: 'DELETE',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+      if (res.ok) {
+        await refreshComments()
+      } else {
+        // If endpoint doesn't exist, remove locally
+        setComments(prev => prev.filter(c => c.id !== commentId))
+      }
+    } catch {
+      // Remove locally as fallback
+      setComments(prev => prev.filter(c => c.id !== commentId))
+    }
+  }
+
   return (
     <div style={{ marginTop: 6 }}>
       {/* Comment toggle button */}
@@ -555,12 +768,22 @@ function BlockComments({ blockId }: { blockId: string }) {
                   <SingleComment
                     comment={c}
                     onReply={(id) => setReplyTo(replyTo === id ? null : id)}
+                    onEdit={handleEditComment}
+                    onDelete={handleDeleteComment}
+                    currentUserId={currentUserId}
                   />
                   {/* Nested replies */}
                   {c.replies && c.replies.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginTop: 8 }}>
                       {c.replies.map((r: any) => (
-                        <SingleComment key={r.id} comment={r} isReply />
+                        <SingleComment
+                          key={r.id}
+                          comment={r}
+                          isReply
+                          onEdit={handleEditComment}
+                          onDelete={handleDeleteComment}
+                          currentUserId={currentUserId}
+                        />
                       ))}
                     </div>
                   )}
@@ -595,7 +818,8 @@ function BlockComments({ blockId }: { blockId: string }) {
 
 export default function DailyFeed() {
   const { currentRole } = useRole()
-  const [selectedDate, setSelectedDate] = useState(new Date(2026, 2, 12))
+  // Use today's date instead of hardcoded March 12
+  const [selectedDate, setSelectedDate] = useState(() => new Date())
   const handleDaySelect = useCallback((d: Date) => setSelectedDate(d), [])
   const selectedDateLabel = useMemo(() => formatDateLabel(selectedDate), [selectedDate])
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set([1, 2]))
@@ -608,6 +832,7 @@ export default function DailyFeed() {
   const [loading, setLoading] = useState(false)
   const [apiLoaded, setApiLoaded] = useState(false)
   const [markedDates, setMarkedDates] = useState<Record<string, 'submitted' | 'partial' | 'none'>>({})
+  const [projectMap, setProjectMap] = useState<Record<number, { name: string; code: string }>>({})
 
   // Map API section enum values to Korean labels
   const sectionLabelMap: Record<string, string> = {
@@ -615,6 +840,8 @@ export default function DailyFeed() {
     today: '오늘 할 일',
     issue: '이슈/논의',
     misc: '기타',
+    progress: '진행 상황',
+    plan: '계획',
   }
 
   // Map API visibility enum values to Korean labels
@@ -624,6 +851,25 @@ export default function DailyFeed() {
     internal: '내부 공개',
     project: '프로젝트 공개',
   }
+
+  // Fetch projects for metadata lookup
+  useEffect(() => {
+    (async () => {
+      try {
+        const res: any = await api.projects.list()
+        const items = Array.isArray(res) ? res : (res?.data || [])
+        const map: Record<number, { name: string; code: string }> = {}
+        for (const p of items) {
+          if (p.id) {
+            map[p.id] = { name: p.name || p.title || '', code: p.code || '' }
+          }
+        }
+        setProjectMap(map)
+      } catch {
+        // Backend not available
+      }
+    })()
+  }, [])
 
   // Fetch marked dates for the current month (for mini calendar)
   useEffect(() => {
@@ -640,7 +886,6 @@ export default function DailyFeed() {
         for (const log of items) {
           const d = typeof log.date === 'string' ? log.date : ''
           if (d) {
-            // Mark as submitted if log exists; could enhance with block count check
             dateMap[d] = 'submitted'
           }
         }
@@ -657,39 +902,63 @@ export default function DailyFeed() {
       setLoading(true)
       try {
         const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
-        // Use date_from and date_to to filter for a specific day
         const apiLogs: any = await api.daily.list({ date_from: dateStr, date_to: dateStr, limit: '50' })
         const items = Array.isArray(apiLogs) ? apiLogs : (apiLogs?.data || [])
         setApiLoaded(true)
         setEntries(items.map((log: any, idx: number) => {
-          // Determine visibility label from the first block (or default)
           const firstBlockVisibility = log.blocks?.[0]?.visibility || 'internal'
           const visibilityLabel = visibilityLabelMap[firstBlockVisibility] || '내부 공개'
+
+          // Try to determine project from blocks' project_id
+          let entryProject = ''
+          let entryProjectCode = ''
+          for (const b of (log.blocks || [])) {
+            if (b.project_id && projectMap[b.project_id]) {
+              entryProject = projectMap[b.project_id].name
+              entryProjectCode = projectMap[b.project_id].code
+              break
+            }
+          }
+
           return {
             id: log.id || idx + 1,
             author: log.author?.name || log.author_name || '',
             authorRole: log.author?.role || 'student',
             date: typeof log.date === 'string' ? log.date : dateStr,
-            project: '',
-            projectCode: '',
+            project: entryProject,
+            projectCode: entryProjectCode,
             visibility: visibilityLabel,
             isAdvisee: true,
-            blocks: (log.blocks || []).map((b: any) => ({
-              id: b.id || null,
-              section: sectionLabelMap[b.section] || b.section || '기타',
-              content: b.content || '',
-              tags: (b.tags || []).map((t: any) => t.tag?.name || t.name || ''),
-            })),
+            blocks: (log.blocks || []).map((b: any) => {
+              // Resolve block-level project
+              const blockProject = b.project_id && projectMap[b.project_id]
+                ? projectMap[b.project_id] : null
+
+              return {
+                id: b.id || null,
+                section: sectionLabelMap[b.section] || b.section || '기타',
+                content: b.content || '',
+                tags: (b.tags || []).map((t: any) => t.tag?.name || t.name || ''),
+                project_id: b.project_id || null,
+                projectName: blockProject?.name || '',
+                // Gather attachments from various possible API shapes
+                attachments: b.attachments || b.files || (b.file_url ? [{
+                  id: b.id + '_file',
+                  file_url: b.file_url,
+                  file_type: b.file_type || '',
+                  file_name: b.file_name || 'file',
+                }] : []),
+              }
+            }),
           }
         }))
       } catch {
-        // Backend not available, show empty
         setEntries([])
       } finally {
         setLoading(false)
       }
     })()
-  }, [selectedDate])
+  }, [selectedDate, projectMap])
 
   const toggleEntry = (id: number) => {
     setExpandedEntries((prev) => {
@@ -703,15 +972,12 @@ export default function DailyFeed() {
   // Role-based entry filtering
   const roleFilteredEntries = entries.filter((entry) => {
     if (currentRole === 'professor') {
-      // Professor sees advisee dailies
       return true
     }
     if (currentRole === 'student') {
-      // Student sees own + project-shared
       return entry.authorRole === 'self' || entry.visibility === '프로젝트 공개'
     }
     if (currentRole === 'external') {
-      // External sees only project-scope blocks from assigned projects
       return entry.visibility === '프로젝트 공개' && externalAssignedProjects.includes(entry.projectCode || '')
     }
     return true
@@ -721,34 +987,33 @@ export default function DailyFeed() {
     if (filterDate && entry.date !== filterDate) return false
     if (filterAuthor && entry.author !== filterAuthor) return false
     if (filterProject && entry.projectCode !== filterProject) return false
-    if (filterSection && !entry.blocks.some((b) => b.section === filterSection)) return false
+    if (filterSection && !entry.blocks.some((b: any) => b.section === filterSection)) return false
     return true
   })
 
   // Group entries by project
   const projectGroupedEntries = useMemo(() => {
     const groups: { project: string; projectCode: string; entries: typeof filteredEntries }[] = []
-    const projectMap = new Map<string, typeof filteredEntries>()
+    const pMap = new Map<string, typeof filteredEntries>()
     const projectNames = new Map<string, string>()
 
     for (const entry of filteredEntries) {
       const code = entry.projectCode || '__none__'
       const name = entry.project || '프로젝트 없음'
-      if (!projectMap.has(code)) {
-        projectMap.set(code, [])
+      if (!pMap.has(code)) {
+        pMap.set(code, [])
         projectNames.set(code, name)
       }
-      projectMap.get(code)!.push(entry)
+      pMap.get(code)!.push(entry)
     }
 
-    // Named projects first, then unassigned
-    for (const [code, entries] of projectMap) {
+    for (const [code, entries] of pMap) {
       if (code !== '__none__') {
         groups.push({ project: projectNames.get(code)!, projectCode: code, entries })
       }
     }
-    if (projectMap.has('__none__')) {
-      groups.push({ project: '프로젝트 없음', projectCode: '__none__', entries: projectMap.get('__none__')! })
+    if (pMap.has('__none__')) {
+      groups.push({ project: '프로젝트 없음', projectCode: '__none__', entries: pMap.get('__none__')! })
     }
 
     return groups
@@ -768,7 +1033,7 @@ export default function DailyFeed() {
   const renderEntryCard = (entry: typeof entries[0], i: number) => {
     const expanded = expandedEntries.has(entry.id)
     const visibleBlocks = currentRole === 'external'
-      ? entry.blocks.filter(b => b.section !== '기타')
+      ? entry.blocks.filter((b: any) => b.section !== '기타')
       : entry.blocks
 
     return (
@@ -827,7 +1092,7 @@ export default function DailyFeed() {
         {/* Entry Blocks */}
         {expanded && (
           <div style={{ padding: '0 24px 20px' }}>
-            {visibleBlocks.map((block, bi) => {
+            {visibleBlocks.map((block: any, bi: number) => {
               const sc = sectionColors[block.section] || sectionColors['기타']
               return (
                 <div key={block.id || bi} style={{
@@ -841,7 +1106,15 @@ export default function DailyFeed() {
                     }}>
                       {block.section}
                     </span>
-                    {block.tags.map((tag) => (
+                    {block.projectName && (
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 500,
+                        background: '#fef3c7', color: '#92400e',
+                      }}>
+                        {block.projectName}
+                      </span>
+                    )}
+                    {block.tags.map((tag: string) => (
                       <span key={tag} style={{
                         padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 500,
                         background: '#e2e8f0', color: '#64748b',
@@ -850,17 +1123,18 @@ export default function DailyFeed() {
                       </span>
                     ))}
                   </div>
-                  <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{block.content}</p>
+                  <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.7, whiteSpace: 'pre-wrap' as const }}>{block.content}</p>
 
                   {/* Attachment previews */}
                   {block.attachments && block.attachments.length > 0 && (
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginTop: 10 }}>
-                      {block.attachments.map((att: any) => {
+                      {block.attachments.map((att: any, attIdx: number) => {
                         const isImage = (att.file_type || att.content_type || '').startsWith('image/')
                         const fileUrl = att.file_url || att.url || ''
                         const fileName = att.file_name || att.original_name || 'file'
+                        if (!fileUrl) return null
                         return (
-                          <div key={att.id} style={{
+                          <div key={att.id || attIdx} style={{
                             borderRadius: 8,
                             border: '1px solid #e2e8f0',
                             overflow: 'hidden',
@@ -1003,6 +1277,8 @@ export default function DailyFeed() {
               { value: '어제 한 일', label: '어제 한 일' },
               { value: '오늘 할 일', label: '오늘 할 일' },
               { value: '이슈/논의', label: '이슈/논의' },
+              { value: '진행 상황', label: '진행 상황' },
+              { value: '계획', label: '계획' },
               { value: '기타', label: '기타' },
             ]} />
           </div>

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, users, projects, tasks, tags, comments, daily, events, weekly_notes, uploads, attendance, notifications
+from app.api.v1 import auth, users, projects, tasks, tags, comments, daily, events, weekly_notes, uploads, attendance, notifications, admin
 
 api_router = APIRouter()
 
@@ -17,3 +17,4 @@ api_router.include_router(weekly_notes.router, prefix="/weekly-notes", tags=["we
 api_router.include_router(uploads.router, prefix="/uploads", tags=["uploads"])
 api_router.include_router(attendance.router, prefix="/attendance", tags=["attendance"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])

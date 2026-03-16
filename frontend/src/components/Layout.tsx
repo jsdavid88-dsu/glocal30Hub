@@ -139,6 +139,7 @@ const allNavItems = [
       { path: '/members', label: 'Students', icon: TeamIcon, roles: ['professor'] as Role[] },
       { path: '/calendar', label: 'Calendar', icon: CalendarIcon, roles: ['professor', 'student', 'external'] as Role[] },
       { path: '/attendance', label: 'Attendance', icon: AttendanceIcon, roles: ['student'] as Role[] },
+      { path: '/admin', label: 'Admin', icon: AdminIcon, roles: ['professor'] as Role[] },
     ],
   },
 ]
@@ -495,7 +496,7 @@ function getPageTitle(path: string) {
   const titles: Record<string, string> = {
     '/': 'Dashboard', '/projects': 'Projects', '/daily/feed': 'Daily',
     '/daily/write': 'Daily Write', '/weekly': 'Weekly', '/members': 'Students', '/calendar': 'Calendar',
-    '/attendance': 'Attendance', '/profile': 'Profile',
+    '/attendance': 'Attendance', '/profile': 'Profile', '/admin': 'Admin',
   }
   return titles[path] || 'R&D Hub'
 }
@@ -532,4 +533,7 @@ function AttendanceIcon({ active }: { active: boolean }) {
 }
 function ProfileIcon({ active }: { active: boolean }) {
   return <svg style={{ width: 18, height: 18, color: active ? '#4f46e5' : undefined }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+}
+function AdminIcon({ active }: { active: boolean }) {
+  return <svg style={{ width: 18, height: 18, color: active ? '#4f46e5' : undefined }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
 }
