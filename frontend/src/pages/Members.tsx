@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useRole } from '../contexts/RoleContext'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../api/client'
@@ -56,6 +57,7 @@ const cardStyle = {
 // ── Component ──────────────────────────────────────────────
 
 export default function Members() {
+  const navigate = useNavigate()
   const { currentRole } = useRole()
   const { user: currentUser } = useAuth()
 
@@ -630,6 +632,25 @@ export default function Members() {
                     ))}
                   </div>
                 )}
+
+                {/* Detail link */}
+                <div style={{ marginTop: 12 }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      navigate(`/members/${member.id}`)
+                    }}
+                    style={{
+                      padding: '5px 14px', borderRadius: 8, fontSize: 11, fontWeight: 500,
+                      border: '1px solid #e2e8f0', background: '#f8fafc', color: '#475569',
+                      cursor: 'pointer', transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#e0e7ff'; e.currentTarget.style.color = '#4338ca' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#475569' }}
+                  >
+                    프로필 보기
+                  </button>
+                </div>
 
                 {/* Professor view: register advisee button */}
                 {currentRole === 'professor' && member.apiRole === 'student' && !member.isAdvisee && (

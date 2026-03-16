@@ -462,8 +462,8 @@ function NotificationBell() {
           </div>
 
           {/* Footer */}
-          {notifications.length > 0 && unreadCount > 0 && (
-            <div style={{ borderTop: '1px solid #f1f5f9', padding: '8px 16px' }}>
+          <div style={{ borderTop: '1px solid #f1f5f9', padding: '8px 16px', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+            {notifications.length > 0 && unreadCount > 0 && (
               <button
                 onClick={markAllAsRead}
                 style={{
@@ -477,8 +477,22 @@ function NotificationBell() {
               >
                 모두 읽음
               </button>
-            </div>
-          )}
+            )}
+            <Link
+              to="/notifications"
+              onClick={() => setOpen(false)}
+              style={{
+                display: 'block', width: '100%', padding: '6px 0',
+                textAlign: 'center' as const, textDecoration: 'none',
+                fontSize: 13, fontWeight: 500, color: '#64748b',
+                borderRadius: 6,
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = '#f8fafc'; (e.currentTarget as HTMLAnchorElement).style.color = '#4f46e5' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.background = 'none'; (e.currentTarget as HTMLAnchorElement).style.color = '#64748b' }}
+            >
+              전체 보기
+            </Link>
+          </div>
         </div>
       )}
     </div>
@@ -489,7 +503,7 @@ function getPageTitle(path: string) {
   const titles: Record<string, string> = {
     '/': 'Dashboard', '/projects': 'Projects', '/daily/feed': 'Daily',
     '/daily/write': 'Daily Write', '/weekly': 'Weekly', '/members': 'Students', '/calendar': 'Calendar',
-    '/attendance': 'Attendance', '/profile': 'Profile', '/admin': 'Admin',
+    '/attendance': 'Attendance', '/profile': 'Profile', '/admin': 'Admin', '/notifications': '알림',
   }
   return titles[path] || 'R&D Hub'
 }

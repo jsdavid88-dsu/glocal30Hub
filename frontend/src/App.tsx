@@ -15,6 +15,8 @@ import Attendance from './pages/Attendance'
 import Weekly from './pages/Weekly'
 import ProjectDetail from './pages/ProjectDetail'
 import Admin from './pages/Admin'
+import Notifications from './pages/Notifications'
+import MemberDetail from './pages/MemberDetail'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth()
@@ -39,10 +41,12 @@ function App() {
               <Route path="/daily/write" element={<DailyWrite />} />
               <Route path="/daily/feed" element={<DailyFeed />} />
               <Route path="/members" element={<Members />} />
+              <Route path="/members/:id" element={<MemberDetail />} />
               <Route path="/calendar" element={<Calendar />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/weekly" element={<Weekly />} />
               <Route path="/admin" element={<Admin />} />
+              <Route path="/notifications" element={<Notifications />} />
             </Route>
           </Routes>
         </BrowserRouter>
