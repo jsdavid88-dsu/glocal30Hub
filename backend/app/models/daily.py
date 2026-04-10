@@ -76,6 +76,9 @@ class DailyBlock(UUIDMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
     visibility: Mapped[BlockVisibility] = mapped_column(Enum(BlockVisibility), nullable=False)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True)
 
     daily_log: Mapped["DailyLog"] = relationship(back_populates="blocks")

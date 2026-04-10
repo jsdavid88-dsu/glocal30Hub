@@ -12,6 +12,7 @@ type EventType =
   | 'deadline'
   | 'presentation'
   | 'leave'
+  | 'absence'
   | 'admin'
   | 'personal'
   | 'project'
@@ -50,9 +51,10 @@ interface StudentUser {
 const eventTypeConfig: Record<string, { label: string; bg: string; color: string; dot: string }> = {
   class:        { label: '수업',   bg: '#e0e7ff', color: '#4338ca', dot: '#4f46e5' },
   meeting:      { label: '회의',   bg: '#d1fae5', color: '#047857', dot: '#059669' },
-  deadline:     { label: '마감',   bg: '#ffe4e6', color: '#be123c', dot: '#e11d48' },
+  deadline:     { label: '마감',   bg: '#ffe4e6', color: '#be123c', dot: '#dc2626' },
   presentation: { label: '발표',   bg: '#fef3c7', color: '#b45309', dot: '#d97706' },
   leave:        { label: '휴가',   bg: '#f1f5f9', color: '#64748b', dot: '#94a3b8' },
+  absence:      { label: '부재',   bg: '#f1f5f9', color: '#475569', dot: '#64748b' },
   admin:        { label: '행정',   bg: '#fce7f3', color: '#9d174d', dot: '#db2777' },
   personal:     { label: '개인',   bg: '#ccfbf1', color: '#0f766e', dot: '#14b8a6' },
   project:      { label: '프로젝트', bg: '#e0e7ff', color: '#3730a3', dot: '#6366f1' },
@@ -77,6 +79,7 @@ const EVENT_TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: 'deadline', label: '마감' },
   { value: 'presentation', label: '발표' },
   { value: 'leave', label: '휴가' },
+  { value: 'absence', label: '부재' },
   { value: 'admin', label: '행정' },
   { value: 'personal', label: '개인' },
   { value: 'project', label: '프로젝트' },
@@ -176,6 +179,9 @@ export default function Calendar() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Selected day panel state
+  const [selectedDay, setSelectedDay] = useState<{ year: number; month: number; day: number } | null>(null)
+
   // Create modal state
   const [showCreate, setShowCreate] = useState(false)
   const [createForm, setCreateForm] = useState({
@@ -185,6 +191,7 @@ export default function Calendar() {
     end_at: '',
     all_day: false,
     description: '',
+    visibility: 'internal' as 'internal' | 'project' | 'public',
   })
   const [creating, setCreating] = useState(false)
 
@@ -206,6 +213,10 @@ export default function Calendar() {
   // Professor student filter
   const [students, setStudents] = useState<StudentUser[]>([])
   const [studentFilter, setStudentFilter] = useState<string>('all') // 'all' | 'advisees' | specific user id
+
+  // Google Calendar
+  const [gcalConnected, setGcalConnected] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   // ---------------------------------------------------------------------------
   // Fetch students for professor filter
@@ -274,6 +285,22 @@ export default function Calendar() {
     fetchEvents()
   }, [fetchEvents])
 
+  // Google Calendar status check
+  useEffect(() => {
+    api.gcal.status().then((res: any) => setGcalConnected(res.connected)).catch(() => {})
+  }, [])
+
+  const handleGcalSync = async () => {
+    setSyncing(true)
+    try {
+      const pushResult = await api.gcal.syncPush() as any
+      const pullResult = await api.gcal.syncPull() as any
+      alert(`동기화 완료: Hub→Google ${pushResult.synced}건, Google→Hub ${pullResult.imported}건`)
+      fetchEvents()
+    } catch { alert('동기화 실패') }
+    finally { setSyncing(false) }
+  }
+
   // ---------------------------------------------------------------------------
   // Filter events by student (professor only)
   // ---------------------------------------------------------------------------
@@ -304,9 +331,10 @@ export default function Calendar() {
         end_at: new Date(createForm.end_at).toISOString(),
         all_day: createForm.all_day,
         description: createForm.description || null,
+        visibility: createForm.visibility,
       })
       setShowCreate(false)
-      setCreateForm({ title: '', event_type: 'meeting', start_at: '', end_at: '', all_day: false, description: '' })
+      setCreateForm({ title: '', event_type: 'meeting', start_at: '', end_at: '', all_day: false, description: '', visibility: 'internal' })
       await fetchEvents()
     } catch (err) {
       console.error('Failed to create event:', err)
@@ -397,8 +425,8 @@ export default function Calendar() {
   // Navigation
   // ---------------------------------------------------------------------------
 
-  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1))
-  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1))
+  const prevMonth = () => { setCurrentDate(new Date(year, month - 1, 1)); setSelectedDay(null) }
+  const nextMonth = () => { setCurrentDate(new Date(year, month + 1, 1)); setSelectedDay(null) }
   const goToday = () => {
     const now = new Date()
     setCurrentDate(new Date(now.getFullYear(), now.getMonth(), 1))
@@ -506,7 +534,7 @@ export default function Calendar() {
   })
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+    <div style={{ width: '100%' }}>
       <style>{`
         @media (max-width: 767px) {
           .cal-header-row {
@@ -543,6 +571,24 @@ export default function Calendar() {
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Google Calendar */}
+            {gcalConnected ? (
+              <button onClick={handleGcalSync} disabled={syncing}
+                style={{ padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                  background: '#e0e7ff', color: '#4338ca', border: 'none', cursor: 'pointer',
+                  opacity: syncing ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 11-6.219-8.56"/><polyline points="21 3 21 12 12 12"/></svg>
+                {syncing ? '동기화 중...' : 'Google Calendar 동기화'}
+              </button>
+            ) : (
+              <a href="/api/v1/auth/login"
+                style={{ padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                  background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0',
+                  textDecoration: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Google Calendar 연결
+              </a>
+            )}
             {/* View Mode Toggle */}
             <div style={{ display: 'flex', gap: 4, background: '#f1f5f9', borderRadius: 10, padding: 3 }}>
               <button onClick={() => setViewMode('monthly')} style={toggleBtnStyle(viewMode === 'monthly')}>
@@ -688,11 +734,23 @@ export default function Calendar() {
                 return (
                   <div
                     key={idx}
+                    onClick={() => {
+                      if (cell.inMonth) {
+                        setSelectedDay(
+                          selectedDay && selectedDay.year === year && selectedDay.month === month && selectedDay.day === cell.day
+                            ? null
+                            : { year, month, day: cell.day }
+                        )
+                      }
+                    }}
                     style={{
                       minHeight: 100, padding: '6px 8px',
                       borderRight: dayOfWeek < 6 ? '1px solid #f1f5f9' : 'none',
                       borderBottom: idx < 35 ? '1px solid #f1f5f9' : 'none',
-                      background: isToday ? '#eef2ff' : cell.inMonth ? '#fff' : '#fafbfc',
+                      background: isToday ? '#eef2ff'
+                        : (selectedDay && selectedDay.year === year && selectedDay.month === month && selectedDay.day === cell.day) ? '#f8fafc'
+                        : cell.inMonth ? '#fff' : '#fafbfc',
+                      cursor: cell.inMonth ? 'pointer' : 'default',
                     }}
                   >
                     <div style={{
@@ -709,12 +767,12 @@ export default function Calendar() {
                       {cell.day}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
-                      {cell.events.map((ev) => {
+                      {cell.events.slice(0, 3).map((ev) => {
                         const cfg = eventTypeConfig[ev.event_type] ?? eventTypeConfig.meeting
                         return (
                           <div
                             key={ev.id}
-                            onClick={() => setSelectedEvent(ev)}
+                            onClick={(e) => { e.stopPropagation(); setSelectedEvent(ev) }}
                             style={{
                               padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 500,
                               background: cfg.bg, color: cfg.color,
@@ -724,15 +782,113 @@ export default function Calendar() {
                             title={ev.title}
                           >
                             {ev.title}
+                            {ev.source === 'google_calendar' && (
+                              <span style={{ fontSize: 9, color: '#94a3b8', marginLeft: 4 }}>G</span>
+                            )}
                           </div>
                         )
                       })}
+                      {cell.events.length > 3 && (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (cell.inMonth) setSelectedDay({ year, month, day: cell.day })
+                          }}
+                          style={{
+                            padding: '1px 6px', fontSize: 10, fontWeight: 500,
+                            color: '#4f46e5', cursor: 'pointer',
+                          }}
+                        >
+                          +{cell.events.length - 3}개 더보기
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
               })}
             </div>
           </div>
+
+          {/* Selected Day Detail Panel */}
+          {selectedDay && (() => {
+            const dayEvents = filteredEvents.filter(e => isEventOnDate(e, selectedDay.year, selectedDay.month, selectedDay.day))
+            const dayDate = new Date(selectedDay.year, selectedDay.month, selectedDay.day)
+            const dayLabel = dayDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })
+            return (
+              <div style={{ ...cardStyle, marginTop: 16, overflow: 'hidden' }}>
+                <div style={{
+                  padding: '14px 24px', borderBottom: '1px solid #f1f5f9',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                  <h3 style={{ fontWeight: 600, fontSize: 15, color: '#0f172a' }}>
+                    {dayLabel} 일정
+                  </h3>
+                  <button
+                    onClick={() => setSelectedDay(null)}
+                    style={{
+                      width: 28, height: 28, borderRadius: 6, border: '1px solid #e2e8f0',
+                      background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    <svg style={{ width: 14, height: 14, color: '#94a3b8' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                {dayEvents.length === 0 ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+                    이 날짜에 일정이 없습니다.
+                  </div>
+                ) : (
+                  <div>
+                    {dayEvents.map((ev, i) => {
+                      const cfg = eventTypeConfig[ev.event_type] ?? eventTypeConfig.meeting
+                      return (
+                        <div
+                          key={ev.id}
+                          onClick={() => setSelectedEvent(ev)}
+                          style={{
+                            padding: '14px 24px',
+                            borderBottom: i < dayEvents.length - 1 ? '1px solid #f8fafc' : 'none',
+                            cursor: 'pointer',
+                            display: 'flex', alignItems: 'flex-start', gap: 14,
+                          }}
+                        >
+                          <div style={{
+                            width: 4, height: 36, borderRadius: 2, background: cfg.dot,
+                            flexShrink: 0, marginTop: 2,
+                          }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <span style={{ fontSize: 14, fontWeight: 500, color: '#0f172a' }}>{ev.title}</span>
+                              <span style={{
+                                padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 600,
+                                background: cfg.bg, color: cfg.color,
+                              }}>
+                                {cfg.label}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 12, color: '#64748b' }}>
+                              {ev.all_day ? '종일' : `${formatTime(ev.start_at)} ~ ${formatTime(ev.end_at)}`}
+                            </div>
+                            {ev.description && (
+                              <p style={{
+                                fontSize: 12, color: '#94a3b8', marginTop: 4,
+                                overflow: 'hidden', textOverflow: 'ellipsis',
+                                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
+                              }}>
+                                {ev.description}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Empty state */}
           {!loading && !error && filteredEvents.length === 0 && (
@@ -822,6 +978,9 @@ export default function Calendar() {
                             title={ev.title}
                           >
                             {ev.title}
+                            {ev.source === 'google_calendar' && (
+                              <span style={{ fontSize: 9, color: '#94a3b8', marginLeft: 4 }}>G</span>
+                            )}
                           </div>
                         )
                       })}
@@ -891,6 +1050,9 @@ export default function Calendar() {
                               whiteSpace: 'nowrap' as const, marginBottom: 1,
                             }}>
                               {ev.title}
+                              {ev.source === 'google_calendar' && (
+                                <span style={{ fontSize: 9, color: '#94a3b8', marginLeft: 4 }}>G</span>
+                              )}
                             </div>
                             <div style={{ fontSize: 9, opacity: 0.8 }}>
                               {formatTime(ev.start_at)}
@@ -939,7 +1101,12 @@ export default function Calendar() {
               >
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: '#0f172a' }}>{ev.title}</p>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: '#0f172a' }}>
+                    {ev.title}
+                    {ev.source === 'google_calendar' && (
+                      <span style={{ fontSize: 9, color: '#94a3b8', marginLeft: 4 }}>G</span>
+                    )}
+                  </p>
                   {!ev.all_day && (
                     <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{formatTime(ev.start_at)}</p>
                   )}
@@ -1042,7 +1209,7 @@ export default function Calendar() {
             </div>
 
             {/* Description */}
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 4 }}>설명</label>
               <textarea
                 value={createForm.description}
@@ -1051,6 +1218,20 @@ export default function Calendar() {
                 rows={3}
                 style={{ ...inputStyle, resize: 'vertical' as const }}
               />
+            </div>
+
+            {/* Visibility */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 4 }}>공개 범위</label>
+              <select
+                value={createForm.visibility}
+                onChange={(e) => setCreateForm((f) => ({ ...f, visibility: e.target.value as 'internal' | 'project' | 'public' }))}
+                style={{ ...inputStyle, cursor: 'pointer' }}
+              >
+                <option value="internal">내부 (연구실)</option>
+                <option value="project">프로젝트</option>
+                <option value="public">전체 공개</option>
+              </select>
             </div>
 
             {/* Buttons */}

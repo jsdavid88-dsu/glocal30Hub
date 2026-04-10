@@ -375,7 +375,7 @@ export default function MemberDetail() {
   // ── Render ──────────────────────────────────────────────
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+    <div style={{ width: '100%' }}>
       {/* Back button */}
       <button
         onClick={() => navigate('/members')}
@@ -630,7 +630,7 @@ export default function MemberDetail() {
               <p style={{ fontSize: 22, fontWeight: 700, color: '#0f172a' }}>{advisorRelations.length}</p>
               <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>지도 관계</p>
             </div>
-            {userInfo.last_login_at && (
+            {userInfo?.last_login_at && (
               <div style={{ padding: '14px 16px', borderRadius: 10, background: '#f8fafc', textAlign: 'center' }}>
                 <p style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
                   {new Date(userInfo.last_login_at).toLocaleDateString('ko-KR')}
@@ -638,7 +638,7 @@ export default function MemberDetail() {
                 <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>최근 로그인</p>
               </div>
             )}
-            {userInfo.created_at && (
+            {userInfo?.created_at && (
               <div style={{ padding: '14px 16px', borderRadius: 10, background: '#f8fafc', textAlign: 'center' }}>
                 <p style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>
                   {new Date(userInfo.created_at).toLocaleDateString('ko-KR')}

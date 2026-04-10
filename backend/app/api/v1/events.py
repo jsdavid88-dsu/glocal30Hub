@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.daily import BlockVisibility
@@ -145,6 +146,21 @@ async def create_event(
     db.add(event)
     await db.commit()
     await db.refresh(event)
+
+    # Google Calendar auto-sync
+    if (
+        settings.GOOGLE_CALENDAR_ENABLED
+        and current_user.google_refresh_token
+        and current_user.google_calendar_connected
+    ):
+        from app.services.google_calendar import create_gcal_event
+        google_event_id = await create_gcal_event(
+            current_user.google_refresh_token, event
+        )
+        if google_event_id:
+            event.google_event_id = google_event_id
+            await db.commit()
+
     return event
 
 
@@ -180,6 +196,17 @@ async def update_event(
 
     await db.commit()
     await db.refresh(event)
+
+    if (
+        settings.GOOGLE_CALENDAR_ENABLED
+        and event.google_event_id
+        and current_user.google_refresh_token
+    ):
+        from app.services.google_calendar import update_gcal_event
+        await update_gcal_event(
+            current_user.google_refresh_token, event.google_event_id, event
+        )
+
     return event
 
 
@@ -199,6 +226,16 @@ async def delete_event(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the event creator can delete this event",
+        )
+
+    if (
+        settings.GOOGLE_CALENDAR_ENABLED
+        and event.google_event_id
+        and current_user.google_refresh_token
+    ):
+        from app.services.google_calendar import delete_gcal_event
+        await delete_gcal_event(
+            current_user.google_refresh_token, event.google_event_id
         )
 
     await db.delete(event)

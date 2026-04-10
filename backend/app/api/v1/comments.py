@@ -8,8 +8,10 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.comment import Comment
+from app.models.daily import DailyBlock, DailyLog
 from app.models.user import User
 from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
+from app.services.notifications import create_notification
 
 router = APIRouter()
 
@@ -93,6 +95,24 @@ async def create_comment(
         image_url=body.image_url,
     )
     db.add(comment)
+
+    # Notify the daily block's author (skip if commenter is the author)
+    block_result = await db.execute(
+        select(DailyBlock)
+        .options(selectinload(DailyBlock.daily_log))
+        .where(DailyBlock.id == block_id)
+    )
+    block = block_result.scalar_one_or_none()
+    if block and block.daily_log and block.daily_log.author_id != current_user.id:
+        await create_notification(
+            db,
+            user_id=block.daily_log.author_id,
+            notification_type="daily_comment",
+            title="데일리에 새 댓글이 달렸습니다",
+            target_type="daily_block",
+            target_id=block_id,
+        )
+
     await db.commit()
     await db.refresh(comment)
 

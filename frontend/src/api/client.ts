@@ -73,13 +73,36 @@ export const api = {
   },
   // Daily
   daily: {
-    list: (params?: Record<string, string>) => request(`/daily-logs/?${new URLSearchParams(params)}`),
+    list: (params?: {
+      q?: string
+      author_id?: string
+      project_id?: string
+      date_from?: string
+      date_to?: string
+      page?: number | string
+      limit?: number | string
+    }) => {
+      const search = new URLSearchParams()
+      if (params) {
+        for (const [k, v] of Object.entries(params)) {
+          if (v !== undefined && v !== null && v !== '') search.set(k, String(v))
+        }
+      }
+      const qs = search.toString()
+      return request(`/daily-logs/${qs ? '?' + qs : ''}`)
+    },
     get: (id: string) => request(`/daily-logs/${id}`),
     create: (data: any) => request('/daily-logs/', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: any) =>
       request(`/daily-logs/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     createBlocks: (logId: string, blocks: any[]) =>
       request(`/daily-logs/${logId}/blocks`, { method: 'POST', body: JSON.stringify(blocks) }),
+    updateBlock: (blockId: string, data: any) =>
+      request(`/daily-blocks/${blockId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    addBlockTag: (blockId: string, tagId: string) =>
+      request(`/daily-blocks/${blockId}/tags`, { method: 'POST', body: JSON.stringify({ tag_id: tagId }) }),
+    removeBlockTag: (blockId: string, tagId: string) =>
+      request(`/daily-blocks/${blockId}/tags/${tagId}`, { method: 'DELETE' }),
   },
   // Tags
   tags: {
@@ -117,6 +140,16 @@ export const api = {
     saveNotes: (weekStart: string, content: string) =>
       request('/weekly-notes/', { method: 'POST', body: JSON.stringify({ week_start: weekStart, content }) }),
     getSummary: (weekStart: string) => request(`/weekly-notes/summary?week_start=${weekStart}`),
+    carryover: (weekStart: string) =>
+      request('/weekly-notes/carryover', { method: 'POST', body: JSON.stringify({ week_start: weekStart }) }),
+  },
+  // Google Calendar
+  gcal: {
+    status: () => request('/gcal/status'),
+    disconnect: () => request('/gcal/disconnect', { method: 'POST' }),
+    syncPush: () => request('/gcal/sync-push', { method: 'POST' }),
+    syncPull: (days?: number) =>
+      request(`/gcal/sync-pull${days ? `?days=${days}` : ''}`, { method: 'POST' }),
   },
   // Events
   events: {

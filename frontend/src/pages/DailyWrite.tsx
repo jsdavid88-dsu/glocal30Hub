@@ -1,78 +1,55 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../api/client'
 
 type TaskStatus = '진행중' | '새로' | '완료' | '블로킹'
-type SectionType = 'progress' | 'issue' | 'plan' | 'misc'
-type VisibilityType = 'private' | 'advisor' | 'internal' | 'project'
-
-interface UploadedFile {
-  id: string
-  filename: string
-  original_name: string
-  content_type: string
-  size: number
-  url: string
-}
+type SectionKey = 'yesterday' | 'today' | 'issue' | 'misc'
 
 interface AssignedTask {
-  id: number
+  id: string
   title: string
   status: TaskStatus
-  url?: string
-  guide?: string
-  project_id?: number
+  project_id?: string
+  project_name?: string
 }
 
-interface ProjectOption {
-  id: number
-  name: string
-  code: string
+interface BlockMeta {
+  task_id: string | null
+  project_id: string | null
+  tags: string[]
+  image_url: string | null
+  image_file?: File | null
 }
 
-const DRAFT_STORAGE_KEY = 'dailyWrite_draft'
-const AUTOSAVE_INTERVAL = 30000 // 30 seconds
+const DRAFT_STORAGE_KEY = 'dailyWrite_draft_v3'
+const AUTOSAVE_INTERVAL = 30000
 
-const defaultMockTasks: AssignedTask[] = [
-  {
-    id: 1,
-    title: 'GAN 기반 이미지 합성 논문 리뷰',
-    status: '진행중',
-    url: 'https://arxiv.org/abs/2406.12345',
-    guide: 'Section 3의 loss function 중심으로',
-  },
-  {
-    id: 2,
-    title: 'StyleGAN3 벤치마크 테스트',
-    status: '새로',
-    url: 'https://github.com/NVlabs/stylegan3',
-    guide: 'FID score 비교',
-  },
-  {
-    id: 3,
-    title: '데이터셋 전처리 스크립트',
-    status: '완료',
-  },
-]
-
-const statusConfig: Record<TaskStatus, { bg: string; color: string }> = {
-  '진행중': { bg: '#e0e7ff', color: '#4338ca' },
-  '새로': { bg: '#d1fae5', color: '#047857' },
-  '완료': { bg: '#f1f5f9', color: '#64748b' },
-  '블로킹': { bg: '#ffe4e6', color: '#be123c' },
+const statusConfig: Record<TaskStatus, { bg: string; color: string; icon: string }> = {
+  '진행중': { bg: '#e0e7ff', color: '#4338ca', icon: '▶' },
+  '새로': { bg: '#d1fae5', color: '#047857', icon: '●' },
+  '완료': { bg: '#f1f5f9', color: '#64748b', icon: '✓' },
+  '블로킹': { bg: '#ffe4e6', color: '#be123c', icon: '!' },
 }
 
-const sectionOptions: { key: SectionType; label: string }[] = [
-  { key: 'progress', label: '진행 상황' },
-  { key: 'issue', label: '이슈/논의' },
-  { key: 'plan', label: '계획' },
-  { key: 'misc', label: '기타' },
-]
+const statusToApi: Record<TaskStatus, string> = {
+  '진행중': 'in_progress',
+  '새로': 'not_started',
+  '완료': 'done',
+  '블로킹': 'blocked',
+}
 
-const visibilityOptions: { key: VisibilityType; label: string }[] = [
-  { key: 'private', label: '나만 보기' },
-  { key: 'advisor', label: '지도교수 공개' },
-  { key: 'internal', label: '내부 공개' },
-  { key: 'project', label: '프로젝트 공개' },
+interface SectionDef {
+  key: SectionKey
+  label: string
+  placeholder: string
+  collapsible: boolean
+  color: string
+}
+
+const sections: SectionDef[] = [
+  { key: 'yesterday', label: '어제 한 일', placeholder: '어제 진행한 내용을 자유롭게 작성하세요...\n\n문단을 나누면 블록으로 분리됩니다.', collapsible: false, color: '#4f46e5' },
+  { key: 'today', label: '오늘 할 일', placeholder: '오늘 진행할 내용을 작성하세요...\n\n문단을 나누면 블록으로 분리됩니다.', collapsible: false, color: '#0891b2' },
+  { key: 'issue', label: '이슈 / 논의', placeholder: '공유할 이슈나 논의사항이 있으면 작성하세요...', collapsible: true, color: '#dc2626' },
+  { key: 'misc', label: '기타 메모', placeholder: '태스크와 무관한 메모, 아이디어 등...', collapsible: true, color: '#94a3b8' },
 ]
 
 const cardStyle = {
@@ -82,263 +59,253 @@ const cardStyle = {
   boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)',
 }
 
-// ── Small inline dropdown ──
-function SmallSelect<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
+// ─── Block action toolbar for each paragraph ───
+function BlockToolbar({
+  meta,
+  tasks,
+  tasksByProject,
+  onSetTask,
+  onAddTag,
+  onRemoveTag,
+  onImageUpload,
+  onImageRemove,
 }: {
-  label: string
-  value: T
-  options: { key: T; label: string }[]
-  onChange: (v: T) => void
+  meta: BlockMeta
+  tasks: AssignedTask[]
+  tasksByProject: { projectName: string; tasks: AssignedTask[] }[]
+  onSetTask: (taskId: string | null, projectId: string | null) => void
+  onAddTag: (tag: string) => void
+  onRemoveTag: (tag: string) => void
+  onImageUpload: (file: File) => void
+  onImageRemove: () => void
 }) {
-  return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-      <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' as const }}>{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as T)}
-        style={{
-          padding: '3px 6px',
-          borderRadius: 6,
-          border: '1px solid #e2e8f0',
-          fontSize: 11,
-          color: '#475569',
-          background: '#f8fafc',
-          outline: 'none',
-          cursor: 'pointer',
-        }}
-      >
-        {options.map((o) => (
-          <option key={o.key} value={o.key}>{o.label}</option>
-        ))}
-      </select>
-    </div>
-  )
-}
+  const [showTask, setShowTask] = useState(false)
+  const [showTag, setShowTag] = useState(false)
+  const [tagInput, setTagInput] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
 
-function FileAttachmentZone({
-  files,
-  uploading,
-  onUpload,
-  onRemove,
-}: {
-  files: UploadedFile[]
-  uploading: boolean
-  onUpload: (files: FileList | null) => void
-  onRemove: (fileId: string) => void
-}) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [dragOver, setDragOver] = useState(false)
+  const linkedTask = meta.task_id ? tasks.find(t => t.id === meta.task_id) : null
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    onUpload(e.dataTransfer.files)
-  }
+  const btnStyle = (active: boolean) => ({
+    padding: '3px 6px', borderRadius: 5, fontSize: 11, fontWeight: 500 as const,
+    border: 'none', cursor: 'pointer' as const, transition: 'all 0.12s',
+    background: active ? '#eef2ff' : 'transparent',
+    color: active ? '#4338ca' : '#94a3b8',
+    display: 'flex' as const, alignItems: 'center' as const, gap: 3,
+  })
 
   return (
-    <div style={{ marginTop: 8 }}>
-      {/* Drop zone */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
-        style={{
-          padding: '12px 16px',
-          borderRadius: 8,
-          border: `1.5px dashed ${dragOver ? '#4f46e5' : '#cbd5e1'}`,
-          background: dragOver ? '#eef2ff' : '#f8fafc',
-          cursor: 'pointer',
-          transition: 'all 0.15s',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-        }}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-          multiple
-          style={{ display: 'none' }}
-          onChange={(e) => { onUpload(e.target.files); e.target.value = '' }}
-        />
-        {uploading ? (
-          <span style={{ fontSize: 12, color: '#4f46e5', fontWeight: 500 }}>업로드 중...</span>
-        ) : (
-          <>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>
-              파일 첨부 (이미지, PDF / 최대 10MB)
+    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+      {/* Task button */}
+      <div style={{ position: 'relative' }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowTask(!showTask); setShowTag(false) }}
+          style={btnStyle(!!meta.task_id)}
+          title="태스크 연결"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+          </svg>
+          {linkedTask && (
+            <span style={{ fontSize: 10, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {linkedTask.title}
             </span>
-          </>
+          )}
+        </button>
+        {showTask && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute', top: '100%', right: 0, zIndex: 20, marginTop: 4,
+              background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: 4, minWidth: 200, maxHeight: 240,
+              overflowY: 'auto' as const,
+            }}
+          >
+            <div
+              onClick={() => { onSetTask(null, null); setShowTask(false) }}
+              style={{ padding: '5px 10px', fontSize: 12, color: '#94a3b8', cursor: 'pointer', borderRadius: 4 }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+            >
+              연결 없음
+            </div>
+            {tasksByProject.map(group => (
+              <div key={group.projectName}>
+                <div style={{ padding: '6px 10px 2px', fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' as const }}>
+                  {group.projectName}
+                </div>
+                {group.tasks.map(t => (
+                  <div
+                    key={t.id}
+                    onClick={() => { onSetTask(t.id, t.project_id || null); setShowTask(false) }}
+                    style={{
+                      padding: '5px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 4,
+                      color: meta.task_id === t.id ? '#4338ca' : '#1e293b',
+                      fontWeight: meta.task_id === t.id ? 600 : 400,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {t.title}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Uploaded file previews */}
-      {files.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, marginTop: 8 }}>
-          {files.map((f) => {
-            const isImage = f.content_type.startsWith('image/')
-            return (
-              <div
-                key={f.id}
-                style={{
-                  position: 'relative' as const,
-                  borderRadius: 8,
-                  border: '1px solid #e2e8f0',
-                  overflow: 'hidden',
-                  background: '#f8fafc',
-                }}
-              >
-                {isImage ? (
-                  <a href={f.url} target="_blank" rel="noopener noreferrer">
-                    <img
-                      src={f.url}
-                      alt={f.original_name}
-                      style={{
-                        width: 80,
-                        height: 80,
-                        objectFit: 'cover' as const,
-                        display: 'block',
-                      }}
-                    />
-                  </a>
-                ) : (
-                  <a
-                    href={f.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column' as const,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 80,
-                      height: 80,
-                      textDecoration: 'none',
-                      padding: 6,
-                    }}
-                  >
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                      <polyline points="14 2 14 8 20 8"/>
-                      <line x1="16" y1="13" x2="8" y2="13"/>
-                      <line x1="16" y1="17" x2="8" y2="17"/>
-                    </svg>
-                    <span style={{
-                      fontSize: 10,
-                      color: '#64748b',
-                      marginTop: 4,
-                      maxWidth: 68,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap' as const,
-                      textAlign: 'center' as const,
-                    }}>
-                      {f.original_name}
-                    </span>
-                  </a>
-                )}
-                {/* Remove button */}
-                <button
-                  onClick={(e) => { e.stopPropagation(); onRemove(f.id) }}
-                  style={{
-                    position: 'absolute' as const,
-                    top: 2,
-                    right: 2,
-                    width: 18,
-                    height: 18,
-                    borderRadius: '50%',
-                    background: 'rgba(0,0,0,0.5)',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: 11,
-                    lineHeight: '18px',
-                    textAlign: 'center' as const,
-                    padding: 0,
-                  }}
-                >
-                  x
-                </button>
+      {/* Tag button */}
+      <div style={{ position: 'relative' }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowTag(!showTag); setShowTask(false) }}
+          style={btnStyle(meta.tags.length > 0)}
+          title="태그 추가"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+            <line x1="7" y1="7" x2="7.01" y2="7"/>
+          </svg>
+          {meta.tags.length > 0 && <span style={{ fontSize: 10 }}>{meta.tags.length}</span>}
+        </button>
+        {showTag && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute', top: '100%', left: 0, zIndex: 20, marginTop: 4,
+              background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: 8, minWidth: 160,
+            }}
+          >
+            {meta.tags.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                {meta.tags.map(t => (
+                  <span key={t} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 2,
+                    padding: '1px 6px', borderRadius: 99, fontSize: 10, fontWeight: 500,
+                    background: '#e0e7ff', color: '#4338ca',
+                  }}>
+                    #{t}
+                    <button onClick={() => onRemoveTag(t)} style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: '#4338ca', fontSize: 11, padding: 0, lineHeight: 1,
+                    }}>×</button>
+                  </span>
+                ))}
               </div>
-            )
-          })}
+            )}
+            <div style={{ display: 'flex', gap: 4 }}>
+              <input
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && tagInput.trim()) {
+                    e.preventDefault()
+                    onAddTag(tagInput.trim())
+                    setTagInput('')
+                  }
+                }}
+                placeholder="태그 입력..."
+                autoFocus
+                style={{
+                  padding: '4px 8px', borderRadius: 5, fontSize: 11, flex: 1,
+                  border: '1px solid #e2e8f0', outline: 'none', minWidth: 0,
+                }}
+              />
+              <button
+                onClick={() => { if (tagInput.trim()) { onAddTag(tagInput.trim()); setTagInput('') } }}
+                style={{
+                  padding: '4px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                  background: '#4f46e5', color: '#fff', border: 'none', cursor: 'pointer',
+                }}
+              >+</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Image button */}
+      <button
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setShowTask(false)
+          setShowTag(false)
+          // Delay click to avoid event conflicts
+          setTimeout(() => fileRef.current?.click(), 0)
+        }}
+        style={btnStyle(!!meta.image_url)}
+        title="이미지 첨부"
+        type="button"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) onImageUpload(file)
+          e.target.value = ''
+        }}
+      />
+
+      {/* Show attached image thumbnail */}
+      {meta.image_url && (
+        <div style={{ position: 'relative', marginLeft: 4 }}>
+          <img src={meta.image_url} alt="" style={{ height: 24, borderRadius: 4, border: '1px solid #e2e8f0' }} />
+          <button
+            onClick={(e) => { e.stopPropagation(); onImageRemove() }}
+            style={{
+              position: 'absolute', top: -4, right: -4, width: 14, height: 14,
+              borderRadius: 99, background: '#ef4444', color: '#fff', border: 'none',
+              fontSize: 9, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              lineHeight: 1,
+            }}
+          >×</button>
         </div>
       )}
     </div>
   )
 }
 
-// ── Draft shape for localStorage ──
-interface DraftData {
-  taskStatuses: Record<number, TaskStatus>
-  taskProgress: Record<number, string>
-  taskSections: Record<number, SectionType>
-  taskVisibilities: Record<number, VisibilityType>
-  taskProjectIds: Record<number, number | null>
-  memoContent: string
-  memoVisibility: string
-  memoSection: SectionType
-  memoProjectId: number | null
-  tags: string[]
-  savedAt: string // ISO string
+// ─── Parse paragraphs from section content ───
+function parseParagraphs(content: string): string[] {
+  if (!content.trim()) return []
+  return content.split(/\n{2,}/).map(p => p.trim()).filter(Boolean)
 }
 
 export default function DailyWrite() {
-  const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
+  const todayStr = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
 
-  const [tasks, setTasks] = useState<AssignedTask[]>(defaultMockTasks)
+  // Section contents
+  const [sectionContents, setSectionContents] = useState<Record<string, string>>({
+    yesterday: '', today: '', issue: '', misc: '',
+  })
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set(['issue', 'misc']))
+
+  // Block metadata: key = "sectionKey-paragraphIndex"
+  const [blockMeta, setBlockMeta] = useState<Record<string, BlockMeta>>({})
+
+  // Tasks
+  const [tasks, setTasks] = useState<AssignedTask[]>([])
+  const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
+  const [tasksExpanded, setTasksExpanded] = useState(true)
+
+  // Save state
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
   const [existingLogId, setExistingLogId] = useState<string | null>(null)
-  const [projects, setProjects] = useState<ProjectOption[]>([])
   const [draftIndicator, setDraftIndicator] = useState<string | null>(null)
   const [showDraftRestore, setShowDraftRestore] = useState(false)
 
-  // Per-block settings
-  const [taskStatuses, setTaskStatuses] = useState<Record<number, TaskStatus>>(
-    Object.fromEntries(defaultMockTasks.map((t) => [t.id, t.status]))
-  )
-  const [taskProgress, setTaskProgress] = useState<Record<number, string>>(
-    Object.fromEntries(defaultMockTasks.map((t) => [t.id, '']))
-  )
-  const [taskSections, setTaskSections] = useState<Record<number, SectionType>>(
-    Object.fromEntries(defaultMockTasks.map((t) => [t.id, 'progress' as SectionType]))
-  )
-  const [taskVisibilities, setTaskVisibilities] = useState<Record<number, VisibilityType>>(
-    Object.fromEntries(defaultMockTasks.map((t) => [t.id, 'advisor' as VisibilityType]))
-  )
-  const [taskProjectIds, setTaskProjectIds] = useState<Record<number, number | null>>(
-    Object.fromEntries(defaultMockTasks.map((t) => [t.id, null]))
-  )
-
-  // Memo block settings
-  const [memoContent, setMemoContent] = useState('')
-  const [memoVisibility, setMemoVisibility] = useState<VisibilityType>('advisor')
-  const [memoSection, setMemoSection] = useState<SectionType>('misc')
-  const [memoProjectId, setMemoProjectId] = useState<number | null>(null)
-
-  // Tags
-  const [tags, setTags] = useState<string[]>([])
-  const [tagInput, setTagInput] = useState('')
-
-  // File attachments per task and memo
-  const [taskFiles, setTaskFiles] = useState<Record<number, UploadedFile[]>>({})
-  const [memoFiles, setMemoFiles] = useState<UploadedFile[]>([])
-  const [uploadingFor, setUploadingFor] = useState<string | null>(null)
-
-  // ── Check for existing daily log for today ──
+  // ── Fetch existing daily log for today ──
   useEffect(() => {
     (async () => {
       try {
@@ -347,362 +314,309 @@ export default function DailyWrite() {
         const items = Array.isArray(res) ? res : (res?.data || [])
         if (items.length > 0 && items[0].id) {
           setExistingLogId(String(items[0].id))
-        }
-      } catch {
-        // Backend not available
-      }
-    })()
-  }, [])
-
-  // ── Fetch projects ──
-  useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await api.projects.list()
-        const items = Array.isArray(res) ? res : (res?.data || [])
-        setProjects(items.map((p: any) => ({
-          id: p.id,
-          name: p.name || p.title || '',
-          code: p.code || '',
-        })))
-      } catch {
-        // Backend not available
-      }
-    })()
-  }, [])
-
-  // ── Fetch tasks ──
-  useEffect(() => {
-    (async () => {
-      try {
-        const apiTasks: any = await api.tasks.my()
-        const items = Array.isArray(apiTasks) ? apiTasks : (apiTasks?.data || [])
-        const statusMap: Record<string, TaskStatus> = {
-            in_progress: '진행중', review: '진행중', '진행중': '진행중',
-            todo: '새로', new: '새로', not_started: '새로', '새로': '새로', '미시작': '새로',
-            done: '완료', completed: '완료', '완료': '완료',
-            blocked: '블로킹', '블로킹': '블로킹',
+          const blocks = items[0].blocks || []
+          if (blocks.length > 0) {
+            const restored: Record<string, string[]> = { yesterday: [], today: [], issue: [], misc: [] }
+            const restoredMeta: Record<string, BlockMeta> = {}
+            for (const b of blocks) {
+              const sec = b.section && restored[b.section] ? b.section : 'misc'
+              const idx = restored[sec].length
+              restored[sec].push(b.content)
+              // Restore block metadata
+              const key = `${sec}-${idx}`
+              restoredMeta[key] = {
+                task_id: b.task_id ? String(b.task_id) : null,
+                project_id: b.project_id ? String(b.project_id) : null,
+                tags: (b.tags || []).map((t: any) => t.tag?.name || t.name || '').filter(Boolean),
+                image_url: null,
+              }
+            }
+            const hasContent = Object.values(restored).some(arr => arr.length > 0)
+            if (hasContent) {
+              setSectionContents({
+                yesterday: restored.yesterday.join('\n\n'),
+                today: restored.today.join('\n\n'),
+                issue: restored.issue.join('\n\n'),
+                misc: restored.misc.join('\n\n'),
+              })
+              setBlockMeta(restoredMeta)
+            }
           }
-          const mapped: AssignedTask[] = items.map((t: any) => ({
-            id: t.id || crypto.randomUUID(),
-            title: t.title || '',
-            status: statusMap[t.status] || '새로',
-            url: t.url || t.reference_url || undefined,
-            guide: t.guide || t.description || undefined,
-            project_id: t.project_id || undefined,
-          }))
-          setTasks(mapped)
-      } catch {
-        // Backend not available, keep mock data
-      }
+        }
+      } catch { /* Backend not available */ }
     })()
   }, [])
 
-  // Re-initialize statuses when tasks change from API
+  // ── Fetch tasks + projects ──
   useEffect(() => {
-    setTaskStatuses(Object.fromEntries(tasks.map((t) => [t.id, t.status])))
-    setTaskProgress(Object.fromEntries(tasks.map((t) => [t.id, ''])))
-    setTaskSections(Object.fromEntries(tasks.map((t) => [t.id, 'progress' as SectionType])))
-    setTaskVisibilities(Object.fromEntries(tasks.map((t) => [t.id, 'advisor' as VisibilityType])))
-    setTaskProjectIds(Object.fromEntries(tasks.map((t) => [t.id, t.project_id ?? null])))
-  }, [tasks])
+    (async () => {
+      try {
+        const [apiTasks, projectsRes]: any[] = await Promise.all([
+          api.tasks.my(),
+          api.projects.list(),
+        ])
+        const taskItems = Array.isArray(apiTasks) ? apiTasks : (apiTasks?.data || [])
+        const projectItems = Array.isArray(projectsRes) ? projectsRes : (projectsRes?.data || [])
+        const projectMap: Record<string, string> = {}
+        for (const p of projectItems) {
+          projectMap[String(p.id)] = p.name || p.code || ''
+        }
 
-  // ── Draft: check for existing draft on mount ──
+        const statusMap: Record<string, TaskStatus> = {
+          in_progress: '진행중', review: '진행중',
+          todo: '새로', new: '새로', not_started: '새로',
+          done: '완료', completed: '완료',
+          blocked: '블로킹',
+        }
+        const mapped: AssignedTask[] = taskItems.map((t: any) => ({
+          id: String(t.id),
+          title: t.title || '',
+          status: statusMap[t.status] || '새로',
+          project_id: t.project_id ? String(t.project_id) : undefined,
+          project_name: t.project_id ? projectMap[String(t.project_id)] : undefined,
+        }))
+        setTasks(mapped)
+        setTaskStatuses(Object.fromEntries(mapped.map(t => [t.id, t.status])))
+      } catch { /* Backend not available */ }
+    })()
+  }, [])
+
+  // ── Draft ──
   useEffect(() => {
     try {
       const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
       if (raw) {
-        const draft: DraftData = JSON.parse(raw)
-        // Only offer restore if draft is from today
+        const draft = JSON.parse(raw)
         const draftDate = new Date(draft.savedAt).toISOString().split('T')[0]
         const todayISO = new Date().toISOString().split('T')[0]
-        if (draftDate === todayISO) {
-          setShowDraftRestore(true)
-        } else {
-          // Old draft, remove it
-          localStorage.removeItem(DRAFT_STORAGE_KEY)
-        }
+        if (draftDate === todayISO) setShowDraftRestore(true)
+        else localStorage.removeItem(DRAFT_STORAGE_KEY)
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }, [])
 
   const restoreDraft = useCallback(() => {
     try {
       const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
       if (!raw) return
-      const draft: DraftData = JSON.parse(raw)
-      // Restore per-task data (only for tasks that exist)
-      const taskIds = new Set(tasks.map(t => t.id))
-      const filteredStatuses: Record<number, TaskStatus> = {}
-      const filteredProgress: Record<number, string> = {}
-      const filteredSections: Record<number, SectionType> = {}
-      const filteredVisibilities: Record<number, VisibilityType> = {}
-      const filteredProjectIds: Record<number, number | null> = {}
-      for (const t of tasks) {
-        filteredStatuses[t.id] = draft.taskStatuses?.[t.id] ?? t.status
-        filteredProgress[t.id] = draft.taskProgress?.[t.id] ?? ''
-        filteredSections[t.id] = draft.taskSections?.[t.id] ?? 'progress'
-        filteredVisibilities[t.id] = draft.taskVisibilities?.[t.id] ?? 'advisor'
-        filteredProjectIds[t.id] = draft.taskProjectIds?.[t.id] ?? (t.project_id ?? null)
-      }
-      setTaskStatuses(filteredStatuses)
-      setTaskProgress(filteredProgress)
-      setTaskSections(filteredSections)
-      setTaskVisibilities(filteredVisibilities)
-      setTaskProjectIds(filteredProjectIds)
-      setMemoContent(draft.memoContent || '')
-      setMemoVisibility((draft.memoVisibility as VisibilityType) || 'advisor')
-      setMemoSection(draft.memoSection || 'misc')
-      setMemoProjectId(draft.memoProjectId ?? null)
-      setTags(draft.tags || [])
+      const draft = JSON.parse(raw)
+      if (draft.sections) setSectionContents(draft.sections)
+      if (draft.blockMeta) setBlockMeta(draft.blockMeta)
+      if (draft.taskStatuses) setTaskStatuses((prev: Record<string, TaskStatus>) => ({ ...prev, ...draft.taskStatuses }))
       const savedTime = new Date(draft.savedAt)
       setDraftIndicator(`임시저장됨 ${savedTime.getHours().toString().padStart(2, '0')}:${savedTime.getMinutes().toString().padStart(2, '0')}`)
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
     setShowDraftRestore(false)
-  }, [tasks])
+  }, [])
 
   const dismissDraft = useCallback(() => {
     localStorage.removeItem(DRAFT_STORAGE_KEY)
     setShowDraftRestore(false)
   }, [])
 
-  // Build draft data
-  const buildDraft = useCallback((): DraftData => {
-    return {
-      taskStatuses,
-      taskProgress,
-      taskSections,
-      taskVisibilities,
-      taskProjectIds,
-      memoContent,
-      memoVisibility,
-      memoSection,
-      memoProjectId,
-      tags,
-      savedAt: new Date().toISOString(),
-    }
-  }, [taskStatuses, taskProgress, taskSections, taskVisibilities, taskProjectIds, memoContent, memoVisibility, memoSection, memoProjectId, tags])
-
   const saveDraftToStorage = useCallback(() => {
     try {
-      const draft = buildDraft()
+      const draft = { sections: sectionContents, blockMeta, taskStatuses, savedAt: new Date().toISOString() }
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft))
       const now = new Date()
       setDraftIndicator(`임시저장됨 ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`)
-    } catch {
-      // ignore
-    }
-  }, [buildDraft])
+    } catch { /* ignore */ }
+  }, [sectionContents, blockMeta, taskStatuses])
 
-  // ── Auto-save every 30 seconds ──
   useEffect(() => {
     const timer = setInterval(() => {
-      // Only auto-save if there's any content
-      const hasContent = Object.values(taskProgress).some(v => v.trim()) || memoContent.trim()
-      if (hasContent) {
-        saveDraftToStorage()
-      }
+      const hasContent = Object.values(sectionContents).some(v => v.trim())
+      if (hasContent) saveDraftToStorage()
     }, AUTOSAVE_INTERVAL)
     return () => clearInterval(timer)
-  }, [saveDraftToStorage, taskProgress, memoContent])
+  }, [saveDraftToStorage, sectionContents])
 
-  const handleFileUpload = useCallback(async (files: FileList | null, target: string, taskId?: number) => {
-    if (!files || files.length === 0) return
-    const uploadKey = taskId !== undefined ? `task-${taskId}` : target
-    setUploadingFor(uploadKey)
-    try {
-      for (const file of Array.from(files)) {
-        if (file.size > 10 * 1024 * 1024) {
-          setSaveMessage(`파일 크기 초과: ${file.name} (최대 10MB)`)
-          continue
-        }
-        const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
-        if (!allowed.includes(file.type)) {
-          setSaveMessage(`허용되지 않는 형식: ${file.name}`)
-          continue
-        }
-        const result = await api.uploads.upload(file)
-        const uploaded: UploadedFile = result as UploadedFile
-        if (taskId !== undefined) {
-          setTaskFiles(prev => ({
-            ...prev,
-            [taskId]: [...(prev[taskId] || []), uploaded],
-          }))
-        } else {
-          setMemoFiles(prev => [...prev, uploaded])
-        }
-      }
-    } catch {
-      setSaveMessage('파일 업로드 실패')
-    } finally {
-      setUploadingFor(null)
-    }
-  }, [])
+  // ── Task status ──
+  const cycleStatus = async (taskId: string) => {
+    const order: TaskStatus[] = ['새로', '진행중', '완료', '블로킹']
+    const current = taskStatuses[taskId] || '새로'
+    const next = order[(order.indexOf(current) + 1) % order.length]
+    setTaskStatuses(prev => ({ ...prev, [taskId]: next }))
+    try { await api.tasks.updateStatus(taskId, statusToApi[next]) } catch { /* ignore */ }
+  }
 
-  const removeFile = useCallback((fileId: string, taskId?: number) => {
-    if (taskId !== undefined) {
-      setTaskFiles(prev => ({
-        ...prev,
-        [taskId]: (prev[taskId] || []).filter(f => f.id !== fileId),
-      }))
-    } else {
-      setMemoFiles(prev => prev.filter(f => f.id !== fileId))
-    }
-  }, [])
-
-  const handleAddTag = () => {
-    const trimmed = tagInput.trim()
-    if (trimmed && !tags.includes(trimmed)) {
-      setTags([...tags, trimmed])
-      setTagInput('')
+  const handleSectionChange = (key: string, value: string) => {
+    setSectionContents(prev => ({ ...prev, [key]: value }))
+    if (value.trim() && collapsedSections.has(key)) {
+      setCollapsedSections(prev => { const n = new Set(prev); n.delete(key); return n })
     }
   }
 
-  const handleRemoveTag = (tag: string) => {
-    setTags(tags.filter((t) => t !== tag))
+  const toggleSection = (key: string) => {
+    setCollapsedSections(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n })
   }
 
-  const statusToApi: Record<TaskStatus, string> = {
-    '진행중': 'in_progress',
-    '새로': 'not_started',
-    '완료': 'done',
-    '블로킹': 'blocked',
+  // ── Block meta helpers ──
+  const getBlockMeta = (key: string): BlockMeta => {
+    return blockMeta[key] || { task_id: null, project_id: null, tags: [], image_url: null }
   }
 
-  const cycleStatus = async (taskId: number) => {
-    const order: TaskStatus[] = ['진행중', '완료', '블로킹']
-    let nextStatus: TaskStatus = '진행중'
-    setTaskStatuses((prev) => {
-      const current = prev[taskId]
-      const idx = order.indexOf(current)
-      nextStatus = order[(idx + 1) % order.length]
-      return { ...prev, [taskId]: nextStatus }
-    })
-    try {
-      await api.tasks.updateStatus(String(taskId), statusToApi[nextStatus])
-    } catch {
-      // Silently ignore if backend is unavailable
+  const updateBlockMeta = (key: string, updates: Partial<BlockMeta>) => {
+    setBlockMeta(prev => ({
+      ...prev,
+      [key]: { ...getBlockMeta(key), ...updates },
+    }))
+  }
+
+  const handleImageUpload = async (key: string, file: File) => {
+    // Show local preview immediately
+    const localUrl = URL.createObjectURL(file)
+    updateBlockMeta(key, { image_url: localUrl, image_file: file })
+  }
+
+  // ── Parsed paragraphs per section (memoized) ──
+  const sectionParagraphs = useMemo(() => {
+    const result: Record<string, string[]> = {}
+    for (const sec of sections) {
+      result[sec.key] = parseParagraphs(sectionContents[sec.key] || '')
     }
-  }
+    return result
+  }, [sectionContents])
 
-  // ── Build blocks and save ──
+  // ── Save ──
   const handleSave = async (isFinal: boolean) => {
     setSaving(true)
     setSaveMessage('')
     try {
       const todayISO = new Date().toISOString().split('T')[0]
-      const taskLines = tasks
-        .filter(t => taskProgress[t.id]?.trim())
-        .map(t => `[${taskStatuses[t.id]}] ${t.title}: ${taskProgress[t.id]}`)
-      const rawContent = [...taskLines, memoContent.trim()].filter(Boolean).join('\n\n')
+      const rawParts: string[] = []
+      for (const sec of sections) {
+        const content = sectionContents[sec.key]?.trim()
+        if (content) rawParts.push(`## ${sec.label}\n${content}`)
+      }
+      const rawContent = rawParts.join('\n\n')
+
       let log: any
       if (existingLogId) {
         log = await api.daily.update(existingLogId, { date: todayISO, raw_content: rawContent })
-        // Keep the id if update doesn't return it
         if (!log?.id) log = { id: existingLogId }
       } else {
         log = await api.daily.create({ date: todayISO, raw_content: rawContent })
-        // Store the new log ID so subsequent saves use update
         if (log?.id) setExistingLogId(String(log.id))
       }
 
-      // Resolve tag names to IDs (create if needed)
-      const tagIds: number[] = []
-      for (const tagName of tags) {
-        try {
-          const created: any = await api.tags.create({ name: tagName })
-          if (created?.id) tagIds.push(created.id)
-        } catch {
-          // Tag may already exist; try listing
+      // Upload images first
+      const imageUploads: Record<string, string> = {}
+      for (const [key, meta] of Object.entries(blockMeta)) {
+        if (meta.image_file) {
           try {
-            const list: any = await api.tags.list({ name: tagName })
-            const items = Array.isArray(list) ? list : (list?.data || [])
-            const found = items.find((t: any) => t.name === tagName)
-            if (found?.id) tagIds.push(found.id)
-          } catch {
-            // skip
-          }
+            const uploaded: any = await api.uploads.upload(meta.image_file)
+            if (uploaded?.url) imageUploads[key] = uploaded.url
+          } catch { /* ignore upload errors */ }
         }
       }
 
+      // Build blocks with metadata
       let blockOrder = 0
       const blocks: any[] = []
-      tasks.filter(t => taskProgress[t.id]?.trim()).forEach(t => {
-        const block: any = {
-          content: `[${taskStatuses[t.id]}] ${t.title}\n${taskProgress[t.id]}`,
-          block_order: blockOrder++,
-          section: taskSections[t.id] || 'progress',
-          visibility: taskVisibilities[t.id] || 'advisor',
+      const blockKeyMap: { key: string; order: number }[] = []
+      for (const sec of sections) {
+        const paragraphs = sectionParagraphs[sec.key]
+        for (let i = 0; i < paragraphs.length; i++) {
+          const key = `${sec.key}-${i}`
+          const meta = getBlockMeta(key)
+          const visibility = meta.project_id ? 'project' : 'advisor'
+          blocks.push({
+            content: paragraphs[i],
+            block_order: blockOrder,
+            section: sec.key,
+            project_id: meta.project_id || undefined,
+            task_id: meta.task_id || undefined,
+            visibility,
+          })
+          blockKeyMap.push({ key, order: blockOrder })
+          blockOrder++
         }
-        if (taskProjectIds[t.id]) {
-          block.project_id = taskProjectIds[t.id]
-        }
-        if (tagIds.length > 0) {
-          block.tag_ids = tagIds
-        }
-        // Associate uploaded files
-        const files = taskFiles[t.id]
-        if (files && files.length > 0) {
-          block.file_ids = files.map(f => f.id)
-        }
-        blocks.push(block)
-      })
-      if (memoContent.trim()) {
-        const memoBlock: any = {
-          content: memoContent,
-          block_order: blockOrder++,
-          section: memoSection,
-          visibility: memoVisibility,
-        }
-        if (memoProjectId) {
-          memoBlock.project_id = memoProjectId
-        }
-        if (tagIds.length > 0) {
-          memoBlock.tag_ids = tagIds
-        }
-        if (memoFiles.length > 0) {
-          memoBlock.file_ids = memoFiles.map(f => f.id)
-        }
-        blocks.push(memoBlock)
       }
+
+      let createdBlocks: any[] = []
       if (log?.id && blocks.length > 0) {
-        await api.daily.createBlocks(String(log.id), blocks)
+        const result = await api.daily.createBlocks(String(log.id), blocks)
+        createdBlocks = Array.isArray(result) ? result : []
       }
+
+      // After blocks created, attach tags and images
+      for (let i = 0; i < blockKeyMap.length; i++) {
+        const { key } = blockKeyMap[i]
+        const meta = getBlockMeta(key)
+        const createdBlock = createdBlocks[i]
+        if (!createdBlock?.id) continue
+
+        // Attach tags
+        for (const tagName of meta.tags) {
+          try {
+            let tagId: string | null = null
+            try {
+              const created: any = await api.tags.create({ name: tagName })
+              if (created?.id) tagId = String(created.id)
+            } catch {
+              const list: any = await api.tags.list()
+              const items = Array.isArray(list) ? list : (list?.data || [])
+              const found = items.find((t: any) => t.name === tagName)
+              if (found?.id) tagId = String(found.id)
+            }
+            if (tagId) {
+              await api.daily.addBlockTag(createdBlock.id, tagId)
+            }
+          } catch { /* ignore tag errors */ }
+        }
+      }
+
       if (isFinal) {
-        // Clear draft on final save
         localStorage.removeItem(DRAFT_STORAGE_KEY)
         setDraftIndicator(null)
-        setSaveMessage('최종 저장 완료')
+        setSaveMessage('제출 완료!')
+        setTimeout(() => setSaveMessage(''), 3000)
       } else {
         saveDraftToStorage()
         setSaveMessage('임시 저장 완료')
+        setTimeout(() => setSaveMessage(''), 2000)
       }
-    } catch {
-      setSaveMessage('저장 실패 (서버 연결 확인)')
+    } catch (err) {
+      console.error('[DailyWrite] save failed:', err)
+      const detail = err instanceof Error ? err.message : '알 수 없는 오류'
+      setSaveMessage(`저장 실패: ${detail}`)
     } finally {
       setSaving(false)
     }
   }
 
-  // Project selector options including "없음"
-  const projectSelectOptions: { key: string; label: string }[] = [
-    { key: '', label: '프로젝트 없음' },
-    ...projects.map(p => ({ key: String(p.id), label: p.name || p.code })),
-  ]
+  // ── Group tasks by project ──
+  const tasksByProject: { projectName: string; tasks: AssignedTask[] }[] = []
+  const noProjectTasks: AssignedTask[] = []
+  const projectGroups: Record<string, AssignedTask[]> = {}
+  for (const t of tasks) {
+    if (t.project_id && t.project_name) {
+      if (!projectGroups[t.project_name]) projectGroups[t.project_name] = []
+      projectGroups[t.project_name].push(t)
+    } else {
+      noProjectTasks.push(t)
+    }
+  }
+  for (const [name, gTasks] of Object.entries(projectGroups)) {
+    tasksByProject.push({ projectName: name, tasks: gTasks })
+  }
+  if (noProjectTasks.length > 0) {
+    tasksByProject.push({ projectName: '프로젝트 없음', tasks: noProjectTasks })
+  }
+
+  const totalTasks = tasks.length
+  const doneTasks = Object.values(taskStatuses).filter(s => s === '완료').length
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto' }}>
+    <div style={{ width: '100%' }}>
       {/* Header */}
-      <div style={{ marginBottom: 32 }} className="animate-fade-in">
+      <div style={{ marginBottom: 28 }} className="animate-fade-in">
         <h1 style={{ fontSize: 26, fontWeight: 600, color: '#0f172a', fontFamily: 'var(--font-display)' }}>
           오늘의 데일리
         </h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
-          <p style={{ color: '#64748b', fontSize: 15 }}>{today}</p>
+          <p style={{ color: '#64748b', fontSize: 15 }}>{todayStr}</p>
           {draftIndicator && (
             <span style={{
               fontSize: 11, color: '#4f46e5', fontWeight: 500,
@@ -718,13 +632,9 @@ export default function DailyWrite() {
       {showDraftRestore && (
         <div style={{
           ...cardStyle,
-          padding: '14px 20px',
-          marginBottom: 20,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: '#fffbeb',
-          border: '1px solid #fde68a',
+          padding: '14px 20px', marginBottom: 20,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: '#fffbeb', border: '1px solid #fde68a',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -733,362 +643,209 @@ export default function DailyWrite() {
             <span style={{ fontSize: 13, color: '#92400e' }}>이전에 작성하던 임시저장 데이터가 있습니다.</span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={restoreDraft}
-              style={{
-                padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer',
-              }}
-            >
-              복원
-            </button>
-            <button
-              onClick={dismissDraft}
-              style={{
-                padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500,
-                background: '#fff', color: '#64748b', border: '1px solid #e2e8f0', cursor: 'pointer',
-              }}
-            >
-              삭제
-            </button>
+            <button onClick={restoreDraft} style={{
+              padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              background: '#f59e0b', color: '#fff', border: 'none', cursor: 'pointer',
+            }}>복원</button>
+            <button onClick={dismissDraft} style={{
+              padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500,
+              background: '#fff', color: '#64748b', border: '1px solid #e2e8f0', cursor: 'pointer',
+            }}>삭제</button>
           </div>
         </div>
       )}
 
-      <div style={{ display: 'grid', gap: 24 }}>
-        {/* Assigned Tasks Section */}
-        <div className="opacity-0 animate-fade-in stagger-1" style={{ ...cardStyle, overflow: 'hidden' }}>
-          <div style={{
-            padding: '20px 28px', borderBottom: '1px solid #f1f5f9',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          }}>
-            <div>
-              <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>이번 주 배정 태스크</h3>
-              <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-                {tasks.length}건 배정 / {Object.values(taskStatuses).filter((s) => s === '완료').length}건 완료
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {tasks.map((task, idx) => {
-              const st = statusConfig[taskStatuses[task.id]] || statusConfig['새로']
-              const isCompleted = taskStatuses[task.id] === '완료'
-              return (
-                <div key={task.id} style={{
-                  borderBottom: idx < tasks.length - 1 ? '1px solid #f1f5f9' : 'none',
-                }}>
-                  {/* Task card header */}
-                  <div style={{
-                    padding: '20px 28px 0',
-                    opacity: isCompleted ? 0.6 : 1,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' as const }}>
-                      <div style={{ flex: 1, minWidth: 200 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                          <button
-                            onClick={() => cycleStatus(task.id)}
-                            style={{
-                              padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 600,
-                              background: st.bg, color: st.color,
-                              border: 'none', cursor: 'pointer', transition: 'all 0.15s',
-                            }}
-                          >
-                            {taskStatuses[task.id]}
+      <div style={{ display: 'grid', gap: 20 }}>
+        {/* ── Assigned Tasks ── */}
+        {tasks.length > 0 && (
+          <div className="opacity-0 animate-fade-in stagger-1" style={{ ...cardStyle, overflow: 'hidden' }}>
+            <button
+              onClick={() => setTasksExpanded(!tasksExpanded)}
+              style={{
+                width: '100%', padding: '16px 24px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' as const,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+                </svg>
+                <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>이번 주 배정 태스크</span>
+                <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 400 }}>{totalTasks}건 / {doneTasks}건 완료</span>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                style={{ transform: tasksExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {tasksExpanded && (
+              <div style={{ padding: '0 24px 16px' }}>
+                {tasksByProject.map((group) => (
+                  <div key={group.projectName} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' as const, letterSpacing: '0.05em', marginBottom: 6, paddingLeft: 2 }}>
+                      {group.projectName}
+                    </div>
+                    {group.tasks.map((task) => {
+                      const st = statusConfig[taskStatuses[task.id] || task.status]
+                      return (
+                        <div key={task.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '8px 10px', borderRadius: 10, marginBottom: 2, transition: 'background 0.1s',
+                        }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc' }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                        >
+                          <button onClick={() => cycleStatus(task.id)} title="클릭하여 상태 변경" style={{
+                            padding: '2px 10px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+                            background: st.bg, color: st.color, border: 'none', cursor: 'pointer', flexShrink: 0,
+                          }}>
+                            {st.icon} {taskStatuses[task.id] || task.status}
                           </button>
                           <span style={{
-                            fontSize: 15, fontWeight: 600, color: '#0f172a',
-                            textDecoration: isCompleted ? 'line-through' : 'none',
+                            fontSize: 13, color: '#1e293b', flex: 1,
+                            textDecoration: (taskStatuses[task.id] || task.status) === '완료' ? 'line-through' : 'none',
+                            opacity: (taskStatuses[task.id] || task.status) === '완료' ? 0.5 : 1,
                           }}>
                             {task.title}
                           </span>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 4 }}>
-                          {task.url && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <svg style={{ width: 14, height: 14, color: '#94a3b8', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                              </svg>
-                              <a
-                                href={task.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ fontSize: 13, color: '#4f46e5', textDecoration: 'none' }}
-                              >
-                                {task.url}
-                              </a>
-                            </div>
-                          )}
-                          {task.guide && (
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                              <svg style={{ width: 14, height: 14, color: '#94a3b8', flexShrink: 0, marginTop: 1 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              <span style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
-                                {task.guide}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Per-block selectors: project, section, visibility */}
-                    {!isCompleted && (
-                      <div style={{
-                        display: 'flex', gap: 12, flexWrap: 'wrap' as const,
-                        marginTop: 10, paddingLeft: 4,
-                      }}>
-                        <SmallSelect
-                          label="프로젝트"
-                          value={String(taskProjectIds[task.id] ?? '')}
-                          options={projectSelectOptions as any}
-                          onChange={(v) => setTaskProjectIds(prev => ({ ...prev, [task.id]: v ? Number(v) : null }))}
-                        />
-                        <SmallSelect
-                          label="섹션"
-                          value={taskSections[task.id] || 'progress'}
-                          options={sectionOptions}
-                          onChange={(v) => setTaskSections(prev => ({ ...prev, [task.id]: v as SectionType }))}
-                        />
-                        <SmallSelect
-                          label="공개"
-                          value={taskVisibilities[task.id] || 'advisor'}
-                          options={visibilityOptions}
-                          onChange={(v) => setTaskVisibilities(prev => ({ ...prev, [task.id]: v as VisibilityType }))}
-                        />
-                      </div>
-                    )}
+                      )
+                    })}
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-                  {/* Progress textarea + file attachment */}
-                  <div style={{ padding: '12px 28px 20px' }}>
+        {/* ── Section Editors with inline block tools ── */}
+        <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden' }}>
+          {sections.map((sec, idx) => {
+            const content = sectionContents[sec.key] || ''
+            const isCollapsed = sec.collapsible && collapsedSections.has(sec.key) && !content.trim()
+            const isLast = idx === sections.length - 1
+            const paragraphs = sectionParagraphs[sec.key]
+
+            return (
+              <div key={sec.key} style={{ borderBottom: isLast ? 'none' : '1px solid #f1f5f9' }}>
+                {/* Section header */}
+                <div
+                  onClick={sec.collapsible && !content.trim() ? () => toggleSection(sec.key) : undefined}
+                  style={{
+                    padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 8,
+                    cursor: sec.collapsible && !content.trim() ? 'pointer' : 'default',
+                  }}
+                >
+                  <div style={{ width: 3, height: 18, borderRadius: 2, background: sec.color }} />
+                  <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', flex: 1 }}>{sec.label}</span>
+                  {sec.collapsible && !content.trim() && (
+                    <span style={{ fontSize: 12, color: '#cbd5e1' }}>{isCollapsed ? '펼치기' : '접기'}</span>
+                  )}
+                </div>
+
+                {!isCollapsed && (
+                  <div style={{ padding: '0 24px 16px' }}>
+                    {/* Textarea */}
                     <textarea
-                      value={taskProgress[task.id]}
-                      onChange={(e) => setTaskProgress((prev) => ({ ...prev, [task.id]: e.target.value }))}
-                      placeholder={isCompleted ? '완료된 태스크입니다.' : '오늘 이 태스크에 대한 진행상황을 기록하세요...'}
-                      disabled={isCompleted}
+                      value={content}
+                      onChange={(e) => handleSectionChange(sec.key, e.target.value)}
+                      placeholder={sec.placeholder}
                       style={{
-                        width: '100%', minHeight: 80, padding: '12px 16px',
-                        borderRadius: 10, border: '1px solid #e2e8f0',
-                        fontSize: 13, color: '#0f172a', lineHeight: 1.7,
+                        width: '100%', minHeight: sec.collapsible ? 80 : 120,
+                        padding: '14px 16px', borderRadius: 10, border: '1px solid #e2e8f0',
+                        fontSize: 14, color: '#0f172a', lineHeight: 1.8,
                         outline: 'none', resize: 'vertical' as const, fontFamily: 'inherit',
-                        background: isCompleted ? '#f8fafc' : '#fff',
-                        transition: 'border-color 0.15s',
+                        background: '#fff', transition: 'border-color 0.15s',
                       }}
-                      onFocus={(e) => { if (!isCompleted) e.currentTarget.style.borderColor = '#4f46e5' }}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = sec.color }}
                       onBlur={(e) => { e.currentTarget.style.borderColor = '#e2e8f0' }}
                     />
-                    {!isCompleted && (
-                      <FileAttachmentZone
-                        files={taskFiles[task.id] || []}
-                        uploading={uploadingFor === `task-${task.id}`}
-                        onUpload={(files) => handleFileUpload(files, 'task', task.id)}
-                        onRemove={(fileId) => removeFile(fileId, task.id)}
-                      />
+
+                    {/* Block previews with toolbars */}
+                    {paragraphs.length > 0 && (
+                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
+                        {paragraphs.map((para, i) => {
+                          const key = `${sec.key}-${i}`
+                          const meta = getBlockMeta(key)
+                          const hasAnyMeta = meta.task_id || meta.tags.length > 0 || meta.image_url
+
+                          return (
+                            <div
+                              key={key}
+                              style={{
+                                display: 'flex', alignItems: 'flex-start', gap: 8,
+                                padding: '6px 10px', borderRadius: 8,
+                                background: hasAnyMeta ? '#fafafe' : '#f8fafc',
+                                border: hasAnyMeta ? '1px solid #e0e7ff' : '1px solid transparent',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              {/* Paragraph text preview */}
+                              <div style={{
+                                flex: 1, fontSize: 12, color: '#64748b', lineHeight: 1.5,
+                                overflow: 'hidden', display: '-webkit-box',
+                                WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as any,
+                              }}>
+                                {para}
+                              </div>
+
+                              {/* Toolbar */}
+                              <div style={{ flexShrink: 0 }}>
+                                <BlockToolbar
+                                  meta={meta}
+                                  tasks={tasks}
+                                  tasksByProject={tasksByProject}
+                                  onSetTask={(tid, pid) => updateBlockMeta(key, { task_id: tid, project_id: pid })}
+                                  onAddTag={(tag) => {
+                                    const m = getBlockMeta(key)
+                                    if (!m.tags.includes(tag)) {
+                                      updateBlockMeta(key, { tags: [...m.tags, tag] })
+                                    }
+                                  }}
+                                  onRemoveTag={(tag) => {
+                                    const m = getBlockMeta(key)
+                                    updateBlockMeta(key, { tags: m.tags.filter(t => t !== tag) })
+                                  }}
+                                  onImageUpload={(file) => handleImageUpload(key, file)}
+                                  onImageRemove={() => updateBlockMeta(key, { image_url: null, image_file: null })}
+                                />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
                     )}
                   </div>
-                </div>
-              )
-            })}
-          </div>
+                )}
+              </div>
+            )
+          })}
         </div>
 
-        {/* Misc Memo Section */}
-        <div className="opacity-0 animate-fade-in stagger-2" style={{ ...cardStyle, overflow: 'hidden' }}>
-          <div style={{
-            padding: '20px 28px', borderBottom: '1px solid #f1f5f9',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          }}>
-            <h3 style={{ fontWeight: 600, fontSize: 17, color: '#0f172a' }}>기타 메모</h3>
-          </div>
-
-          <div style={{ padding: '16px 28px' }}>
-            <textarea
-              value={memoContent}
-              onChange={(e) => setMemoContent(e.target.value)}
-              placeholder="태스크와 무관한 메모, 아이디어, 논의사항 등을 자유롭게 기록하세요..."
-              style={{
-                width: '100%', minHeight: 120, padding: '14px 16px',
-                borderRadius: 10, border: '1px solid #e2e8f0',
-                fontSize: 13, color: '#0f172a', lineHeight: 1.7,
-                outline: 'none', resize: 'vertical' as const, fontFamily: 'inherit',
-                background: '#fff', transition: 'border-color 0.15s',
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = '#4f46e5' }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = '#e2e8f0' }}
-            />
-            <FileAttachmentZone
-              files={memoFiles}
-              uploading={uploadingFor === 'memo'}
-              onUpload={(files) => handleFileUpload(files, 'memo')}
-              onRemove={(fileId) => removeFile(fileId)}
-            />
-          </div>
-
-          {/* Memo block selectors + Visibility + Tags */}
-          <div style={{ padding: '0 28px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Per-block selectors for memo */}
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#64748b', marginBottom: 6 }}>
-                  프로젝트
-                </label>
-                <select
-                  value={String(memoProjectId ?? '')}
-                  onChange={(e) => setMemoProjectId(e.target.value ? Number(e.target.value) : null)}
-                  style={{
-                    padding: '6px 12px', borderRadius: 8, fontSize: 12,
-                    border: '1px solid #e2e8f0', color: '#475569',
-                    background: '#fff', outline: 'none', cursor: 'pointer',
-                  }}
-                >
-                  <option value="">프로젝트 없음</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={String(p.id)}>{p.name || p.code}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#64748b', marginBottom: 6 }}>
-                  섹션
-                </label>
-                <select
-                  value={memoSection}
-                  onChange={(e) => setMemoSection(e.target.value as SectionType)}
-                  style={{
-                    padding: '6px 12px', borderRadius: 8, fontSize: 12,
-                    border: '1px solid #e2e8f0', color: '#475569',
-                    background: '#fff', outline: 'none', cursor: 'pointer',
-                  }}
-                >
-                  {sectionOptions.map(o => (
-                    <option key={o.key} value={o.key}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Visibility */}
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#64748b', marginBottom: 6 }}>
-                공개 범위
-              </label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
-                {visibilityOptions.map((v) => {
-                  const active = memoVisibility === v.key
-                  return (
-                    <button
-                      key={v.key}
-                      onClick={() => setMemoVisibility(v.key)}
-                      style={{
-                        padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500,
-                        border: 'none', cursor: 'pointer', transition: 'all 0.15s',
-                        background: active ? '#4f46e5' : '#f1f5f9',
-                        color: active ? '#fff' : '#475569',
-                      }}
-                    >
-                      {v.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Tags */}
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: '#64748b', marginBottom: 6 }}>
-                태그
-              </label>
-              {tags.length > 0 && (
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 8 }}>
-                  {tags.map((tag) => (
-                    <span key={tag} style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 4,
-                      padding: '4px 10px', borderRadius: 99, fontSize: 12, fontWeight: 500,
-                      background: '#e0e7ff', color: '#4338ca',
-                    }}>
-                      {tag}
-                      <button
-                        onClick={() => handleRemoveTag(tag)}
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer',
-                          color: '#4338ca', fontSize: 13, lineHeight: 1, padding: 0,
-                        }}
-                      >
-                        x
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
-                  placeholder="태그 입력 후 Enter..."
-                  style={{
-                    flex: 1, padding: '6px 12px', borderRadius: 8,
-                    border: '1px solid #e2e8f0', fontSize: 13, color: '#0f172a', outline: 'none',
-                  }}
-                />
-                <button
-                  onClick={handleAddTag}
-                  style={{
-                    padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-                    background: '#f1f5f9', color: '#475569', border: 'none', cursor: 'pointer',
-                  }}
-                >
-                  추가
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Action Buttons */}
+        {/* ── Action Buttons ── */}
         <div className="opacity-0 animate-fade-in stagger-3" style={{
           display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 32,
         }}>
           {saveMessage && (
-            <span style={{ fontSize: 13, color: saveMessage.includes('실패') ? '#be123c' : '#047857', alignSelf: 'center' }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: saveMessage.includes('실패') ? '#be123c' : '#047857' }}>
               {saveMessage}
             </span>
           )}
-          <button
-            disabled={saving}
-            onClick={() => saveDraftToStorage()}
-            style={{
-              padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 500,
-              background: '#f1f5f9', color: '#475569', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
-              opacity: saving ? 0.6 : 1,
-            }}
-          >
+          <button disabled={saving} onClick={() => saveDraftToStorage()} style={{
+            padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 500,
+            background: '#f1f5f9', color: '#475569', border: 'none',
+            cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1,
+          }}>
             임시저장
           </button>
-          <button
-            disabled={saving}
-            onClick={() => handleSave(false)}
-            style={{
-              padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 500,
-              background: '#f1f5f9', color: '#475569', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
-              opacity: saving ? 0.6 : 1,
-            }}
-          >
-            서버 임시저장
-          </button>
-          <button
-            disabled={saving}
-            onClick={() => handleSave(true)}
-            style={{
-              padding: '10px 24px', borderRadius: 10, fontSize: 14, fontWeight: 600,
-              background: '#4f46e5', color: '#fff', border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
-              boxShadow: '0 2px 8px rgba(79,70,229,0.3)',
-              opacity: saving ? 0.6 : 1,
-            }}
-          >
-            {saving ? '저장중...' : '최종 저장'}
+          <button disabled={saving} onClick={() => handleSave(true)} style={{
+            padding: '10px 28px', borderRadius: 10, fontSize: 14, fontWeight: 600,
+            background: '#4f46e5', color: '#fff', border: 'none',
+            cursor: saving ? 'not-allowed' : 'pointer',
+            boxShadow: '0 2px 8px rgba(79,70,229,0.3)', opacity: saving ? 0.6 : 1,
+          }}>
+            {saving ? '저장 중...' : '제출'}
           </button>
         </div>
       </div>

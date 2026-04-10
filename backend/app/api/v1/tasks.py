@@ -13,6 +13,7 @@ from app.dependencies import get_current_user
 from app.models.project import Project
 from app.models.task import Task, TaskAssignee, TaskGroup, TaskGroupStatus, TaskPriority, TaskStatus
 from app.models.user import User, UserRole
+from app.services.notifications import create_notification
 from app.schemas.task import (
     TaskAssigneeCreate,
     TaskAssigneeResponse,
@@ -906,6 +907,17 @@ async def add_assignee(
         is_primary=body.is_primary,
     )
     db.add(assignee)
+
+    # Notify the assigned user
+    await create_notification(
+        db,
+        user_id=body.user_id,
+        notification_type="task_assigned",
+        title=f"새 태스크가 배정되었습니다: {task.title}",
+        target_type="task",
+        target_id=task_id,
+    )
+
     await db.commit()
     await db.refresh(assignee)
 

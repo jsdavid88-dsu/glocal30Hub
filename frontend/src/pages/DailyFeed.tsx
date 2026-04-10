@@ -1,7 +1,9 @@
 import { useState, useCallback, useMemo, useEffect, useRef, useId } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useRole } from '../contexts/RoleContext'
 import { api } from '../api/client'
 import MiniCalendar from '../components/MiniCalendar'
+import FeedFilterBar, { type FeedFilters } from '../components/FeedFilterBar'
 
 // External assigned projects — populated dynamically from API
 
@@ -605,10 +607,8 @@ function SingleComment({
 function BlockComments({ blockId }: { blockId: string }) {
   const [open, setOpen] = useState(false)
   const [comments, setComments] = useState<any[]>([])
-  const [commentCount, setCommentCount] = useState(0)
   const [replyTo, setReplyTo] = useState<string | null>(null)
   const [currentUserId, setCurrentUserId] = useState<string | number | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   // Try to get the current user id
   useEffect(() => {
@@ -639,11 +639,6 @@ function BlockComments({ blockId }: { blockId: string }) {
         const data: any = await api.comments.list(blockId)
         const items = Array.isArray(data) ? data : (data?.data || [])
         setComments(items)
-        let count = items.length
-        for (const c of items) {
-          if (c.replies) count += c.replies.length
-        }
-        setCommentCount(count)
       } catch {
         // API not available
       }
@@ -655,11 +650,6 @@ function BlockComments({ blockId }: { blockId: string }) {
       const data: any = await api.comments.list(blockId)
       const items = Array.isArray(data) ? data : (data?.data || [])
       setComments(items)
-      let count = items.length
-      for (const c of items) {
-        if (c.replies) count += c.replies.length
-      }
-      setCommentCount(count)
     } catch {
       // ignore
     }
@@ -817,11 +807,37 @@ function BlockComments({ blockId }: { blockId: string }) {
 
 export default function DailyFeed() {
   const { currentRole } = useRole()
+  // URL ↔ filter state sync (shareable feed URLs)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const feedFilters: FeedFilters = useMemo(
+    () => ({
+      scope: (searchParams.get('scope') as FeedFilters['scope']) ?? 'all',
+      authorId: searchParams.get('author_id') ?? undefined,
+      projectId: searchParams.get('project_id') ?? undefined,
+      q: searchParams.get('q') ?? '',
+    }),
+    [searchParams],
+  )
+  const updateFeedFilters = useCallback(
+    (next: FeedFilters) => {
+      const params = new URLSearchParams()
+      if (next.scope !== 'all') params.set('scope', next.scope)
+      if (next.authorId) params.set('author_id', next.authorId)
+      if (next.projectId) params.set('project_id', next.projectId)
+      if (next.q) params.set('q', next.q)
+      setSearchParams(params, { replace: true })
+    },
+    [setSearchParams],
+  )
+  const filtersActive = Boolean(
+    feedFilters.q || feedFilters.authorId || feedFilters.projectId,
+  )
+
   // Use today's date instead of hardcoded March 12
   const [selectedDate, setSelectedDate] = useState(() => new Date())
   const handleDaySelect = useCallback((d: Date) => setSelectedDate(d), [])
   const selectedDateLabel = useMemo(() => formatDateLabel(selectedDate), [selectedDate])
-  const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set([1, 2]))
+  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
   const [filterDate, setFilterDate] = useState('')
   const [filterAuthor, setFilterAuthor] = useState('')
   const [filterProject, setFilterProject] = useState('')
@@ -831,8 +847,9 @@ export default function DailyFeed() {
   const [loading, setLoading] = useState(false)
   const [apiLoaded, setApiLoaded] = useState(false)
   const [markedDates, setMarkedDates] = useState<Record<string, 'submitted' | 'partial' | 'none'>>({})
-  const [projectMap, setProjectMap] = useState<Record<number, { name: string; code: string }>>({})
+  const [projectMap, setProjectMap] = useState<Record<string, { name: string; code: string }>>({})
   const [externalAssignedProjects, setExternalAssignedProjects] = useState<string[]>([])
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   // Map API section enum values to Korean labels
   const sectionLabelMap: Record<string, string> = {
@@ -852,13 +869,23 @@ export default function DailyFeed() {
     project: '프로젝트 공개',
   }
 
+  // Fetch current user id
+  useEffect(() => {
+    (async () => {
+      try {
+        const me: any = await api.auth.me()
+        if (me?.id) setCurrentUserId(String(me.id))
+      } catch { /* not logged in */ }
+    })()
+  }, [])
+
   // Fetch projects for metadata lookup + external assigned projects
   useEffect(() => {
     (async () => {
       try {
         const res: any = await api.projects.list()
         const items = Array.isArray(res) ? res : (res?.data || [])
-        const map: Record<number, { name: string; code: string }> = {}
+        const map: Record<string, { name: string; code: string }> = {}
         const codes: string[] = []
         for (const p of items) {
           if (p.id) {
@@ -899,13 +926,21 @@ export default function DailyFeed() {
     })()
   }, [selectedDate.getFullYear(), selectedDate.getMonth()])
 
-  // Fetch entries for the selected date
+  // Fetch entries — uses filters when active, otherwise the selected date
   useEffect(() => {
     (async () => {
       setLoading(true)
       try {
         const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
-        const apiLogs: any = await api.daily.list({ date_from: dateStr, date_to: dateStr, limit: '50' })
+        const params: Parameters<typeof api.daily.list>[0] = filtersActive
+          ? {
+              q: feedFilters.q || undefined,
+              author_id: feedFilters.authorId,
+              project_id: feedFilters.projectId,
+              limit: 50,
+            }
+          : { date_from: dateStr, date_to: dateStr, limit: 50 }
+        const apiLogs: any = await api.daily.list(params)
         const items = Array.isArray(apiLogs) ? apiLogs : (apiLogs?.data || [])
         setApiLoaded(true)
         setEntries(items.map((log: any, idx: number) => {
@@ -925,6 +960,7 @@ export default function DailyFeed() {
 
           return {
             id: log.id || idx + 1,
+            author_id: log.author_id || log.author?.id || '',
             author: log.author?.name || log.author_name || '',
             authorRole: log.author?.role || 'student',
             date: typeof log.date === 'string' ? log.date : dateStr,
@@ -961,13 +997,14 @@ export default function DailyFeed() {
         setLoading(false)
       }
     })()
-  }, [selectedDate, projectMap])
+  }, [selectedDate, projectMap, filtersActive, feedFilters.q, feedFilters.authorId, feedFilters.projectId])
 
-  const toggleEntry = (id: number) => {
+  const toggleEntry = (id: string | number) => {
+    const key = String(id)
     setExpandedEntries((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -978,7 +1015,9 @@ export default function DailyFeed() {
       return true
     }
     if (currentRole === 'student') {
-      return entry.authorRole === 'self' || entry.visibility === '프로젝트 공개'
+      // 본인 글은 항상 보임 + 프로젝트 공개 글도 보임
+      const isOwnEntry = currentUserId && String(entry.author_id) === currentUserId
+      return isOwnEntry || entry.visibility === '프로젝트 공개'
     }
     if (currentRole === 'external') {
       return entry.visibility === '프로젝트 공개' && externalAssignedProjects.includes(entry.projectCode || '')
@@ -1034,7 +1073,7 @@ export default function DailyFeed() {
 
   // Render a single entry card
   const renderEntryCard = (entry: typeof entries[0], i: number) => {
-    const expanded = expandedEntries.has(entry.id)
+    const expanded = expandedEntries.has(String(entry.id))
     const visibleBlocks = currentRole === 'external'
       ? entry.blocks.filter((b: any) => b.section !== '기타')
       : entry.blocks
@@ -1202,7 +1241,7 @@ export default function DailyFeed() {
   }
 
   return (
-    <div key={currentRole} className="daily-feed-root" style={{ maxWidth: 1160, margin: '0 auto' }}>
+    <div key={currentRole} className="daily-feed-root" style={{ width: '100%' }}>
       {/* Header */}
       <div style={{ marginBottom: 32, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap' as const, gap: 12 }} className="animate-fade-in">
         <div>
@@ -1238,11 +1277,14 @@ export default function DailyFeed() {
         </div>
       </div>
 
+      {/* Filter bar (member/project/all + keyword search) */}
+      <FeedFilterBar value={feedFilters} onChange={updateFeedFilters} />
+
       {/* Main content + sidebar layout */}
       <div className="daily-feed-layout" style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
         {/* Left: main content */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Selected date label */}
+          {/* Selected date label (only when no active filters) */}
           <div className="opacity-0 animate-fade-in stagger-1" style={{
             display: 'flex', alignItems: 'center', gap: 10,
             marginBottom: 16,

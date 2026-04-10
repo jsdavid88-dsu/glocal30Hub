@@ -245,7 +245,7 @@ export default function Attendance() {
   const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 
   return (
-    <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ width: '100%' }}>
       {/* Header */}
       <div style={{ marginBottom: 32 }} className="animate-fade-in">
         <h1 style={{ fontSize: 26, fontWeight: 600, color: '#0f172a', fontFamily: 'var(--font-display)' }}>

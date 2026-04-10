@@ -12,7 +12,10 @@ class DailyBlockCreate(BaseModel):
     block_order: int = Field(..., ge=0)
     section: BlockSection = BlockSection.misc
     project_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
     visibility: BlockVisibility = BlockVisibility.internal
+
+    model_config = {"extra": "ignore"}
 
 
 class DailyBlockUpdate(BaseModel):
@@ -20,6 +23,7 @@ class DailyBlockUpdate(BaseModel):
     block_order: int | None = Field(None, ge=0)
     section: BlockSection | None = None
     project_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
     visibility: BlockVisibility | None = None
 
 
@@ -44,6 +48,7 @@ class DailyBlockResponse(BaseModel):
     block_order: int
     section: BlockSection
     project_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
     visibility: BlockVisibility
     tags: list[DailyBlockTagResponse] = Field(default_factory=list)
     created_at: datetime

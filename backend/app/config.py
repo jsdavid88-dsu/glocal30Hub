@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production"
     SESSION_MAX_AGE: int = 86400 * 7  # 7 days
 
+    # Encryption key for sensitive data (Fernet, base64-encoded 32-byte key)
+    ENCRYPTION_KEY: str = ""
+
+    # Google Calendar
+    GOOGLE_CALENDAR_ENABLED: bool = True
+
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
 

@@ -18,5 +18,8 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    watch: {
+      ignored: ['**/.playwright-mcp/**', '**/node_modules/**'],
+    },
   },
 })

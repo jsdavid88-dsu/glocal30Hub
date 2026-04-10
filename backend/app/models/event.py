@@ -64,6 +64,7 @@ class Event(UUIDMixin, TimestampMixin, Base):
     source: Mapped[EventSource] = mapped_column(
         Enum(EventSource), nullable=False, default=EventSource.manual
     )
+    google_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
 
     participants: Mapped[list["EventParticipant"]] = relationship(back_populates="event")
     creator: Mapped["User"] = relationship()

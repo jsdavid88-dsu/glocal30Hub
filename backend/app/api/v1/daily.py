@@ -14,6 +14,7 @@ from app.models.daily import (
     DailyBlockTag,
     DailyLog,
 )
+from app.models.tag import Tag
 from app.models.project import ProjectMember
 from app.models.user import AdvisorRelation, User, UserRole
 from app.schemas.daily import (
@@ -169,14 +170,22 @@ async def list_daily_logs(
     date_to: date | None = Query(None),
     author_id: uuid.UUID | None = Query(None),
     project_id: uuid.UUID | None = Query(None),
+    q: str | None = Query(None, description="Keyword search across block content"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    """List daily logs with filtering and pagination."""
+    """List daily logs with filtering, keyword search, and pagination."""
     query = select(DailyLog).options(
         selectinload(DailyLog.author),
         _block_load_options(),
     )
+
+    # Professor: only show logs from their advisees (unless explicit author_id filter)
+    if current_user.role == UserRole.professor and author_id is None:
+        advisee_ids_q = select(AdvisorRelation.student_id).where(
+            AdvisorRelation.professor_id == current_user.id
+        )
+        query = query.where(DailyLog.author_id.in_(advisee_ids_q))
 
     if date_from is not None:
         query = query.where(DailyLog.date >= date_from)
@@ -189,6 +198,19 @@ async def list_daily_logs(
         query = query.where(
             DailyLog.id.in_(
                 select(DailyBlock.daily_log_id).where(DailyBlock.project_id == project_id)
+            )
+        )
+    if q:
+        # Full-text search on block content via search_vector (TSVECTOR + GIN)
+        # Falls back to ILIKE if search_vector is empty (e.g. before backfill)
+        query = query.where(
+            DailyLog.id.in_(
+                select(DailyBlock.daily_log_id).where(
+                    DailyBlock.search_vector.op("@@")(
+                        func.plainto_tsquery("simple", q)
+                    )
+                    | DailyBlock.content.ilike(f"%{q}%")
+                )
             )
         )
 
@@ -308,6 +330,7 @@ async def create_blocks(
     )
     for old_block in existing.scalars().all():
         await db.delete(old_block)
+    await db.flush()
 
     # Create new blocks
     created = []
@@ -318,6 +341,7 @@ async def create_blocks(
             block_order=block_data.block_order,
             section=block_data.section,
             project_id=block_data.project_id,
+            task_id=block_data.task_id,
             visibility=block_data.visibility,
         )
         db.add(block)
@@ -403,4 +427,79 @@ async def delete_block(
     await _check_author(log, current_user)
 
     await db.delete(block)
+    await db.commit()
+
+
+@block_router.post("/{block_id}/tags", status_code=201)
+async def add_tag_to_block(
+    block_id: uuid.UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Add a tag to a block. Accepts {tag_id: uuid}. Author only."""
+    tag_id = body.get("tag_id")
+    if not tag_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="tag_id is required")
+
+    result = await db.execute(select(DailyBlock).where(DailyBlock.id == block_id))
+    block = result.scalar_one_or_none()
+    if block is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Block not found")
+
+    log_result = await db.execute(select(DailyLog).where(DailyLog.id == block.daily_log_id))
+    log = log_result.scalar_one()
+    await _check_author(log, current_user)
+
+    # Check tag exists
+    tag_result = await db.execute(select(Tag).where(Tag.id == uuid.UUID(str(tag_id))))
+    if tag_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+
+    # Check duplicate
+    existing = await db.execute(
+        select(DailyBlockTag).where(
+            DailyBlockTag.daily_block_id == block_id,
+            DailyBlockTag.tag_id == uuid.UUID(str(tag_id)),
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag already attached")
+
+    block_tag = DailyBlockTag(daily_block_id=block_id, tag_id=uuid.UUID(str(tag_id)))
+    db.add(block_tag)
+    await db.commit()
+    await db.refresh(block_tag)
+
+    return {"id": str(block_tag.id), "tag_id": str(tag_id)}
+
+
+@block_router.delete("/{block_id}/tags/{tag_id}", status_code=204)
+async def remove_tag_from_block(
+    block_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove a tag from a block. Author only."""
+    result = await db.execute(select(DailyBlock).where(DailyBlock.id == block_id))
+    block = result.scalar_one_or_none()
+    if block is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Block not found")
+
+    log_result = await db.execute(select(DailyLog).where(DailyLog.id == block.daily_log_id))
+    log = log_result.scalar_one()
+    await _check_author(log, current_user)
+
+    bt_result = await db.execute(
+        select(DailyBlockTag).where(
+            DailyBlockTag.daily_block_id == block_id,
+            DailyBlockTag.tag_id == tag_id,
+        )
+    )
+    bt = bt_result.scalar_one_or_none()
+    if bt is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Block-tag link not found")
+
+    await db.delete(bt)
     await db.commit()

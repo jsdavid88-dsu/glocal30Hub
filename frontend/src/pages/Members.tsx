@@ -353,7 +353,7 @@ export default function Members() {
   }
 
   return (
-    <div key={currentRole} style={{ maxWidth: 1100, margin: '0 auto' }}>
+    <div key={currentRole} style={{ width: '100%' }}>
       {/* Header */}
       <div style={{ marginBottom: 24 }} className="animate-fade-in">
         <h1 style={{ fontSize: 26, fontWeight: 600, color: '#0f172a', fontFamily: 'var(--font-display)' }}>

@@ -60,6 +60,9 @@ export default function Profile() {
   const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
 
+  // Google Calendar
+  const [gcalConnected, setGcalConnected] = useState(false)
+
   useEffect(() => {
     setLoading(true)
     api.auth.me().then(async (user: any) => {
@@ -75,11 +78,23 @@ export default function Profile() {
       const interestFields = user.interest_fields || []
       setInterests(Array.isArray(interestFields) ? interestFields : interestFields.split(',').map((s: string) => s.trim()).filter(Boolean))
 
-      // Fetch advisor info for students
-      if (user.role === 'student' && user.advisor_id) {
+      // Fetch advisor info for students via advisors endpoint
+      if (user.role === 'student') {
         try {
-          const advisor: any = await api.users.get(user.advisor_id)
-          setAdvisorInfo(advisor)
+          const advisorRes = await fetch(`/api/v1/users/${user.id}/advisors`, {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(localStorage.getItem('token') ? { Authorization: `Bearer ${localStorage.getItem('token')}` } : {}),
+            },
+          })
+          if (advisorRes.ok) {
+            const data = await advisorRes.json()
+            const relations = data?.data || []
+            const relation = relations.find((r: any) => r.student_id === user.id || r.student?.id === user.id)
+            if (relation?.professor) {
+              setAdvisorInfo(relation.professor)
+            }
+          }
         } catch {
           // advisor not found
         }
@@ -88,20 +103,25 @@ export default function Profile() {
       // Fetch advisees for professors via advisors API
       if (user.role === 'professor') {
         try {
-          const token = localStorage.getItem('token')
-          const res = await fetch(`/api/v1/users/${user.id}/advisees`, {
+          // Use the advisors endpoint which returns relations for both directions
+          const advisorRes: any = await fetch(`/api/v1/users/${user.id}/advisors`, {
             headers: {
               'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              ...(localStorage.getItem('token') ? { Authorization: `Bearer ${localStorage.getItem('token')}` } : {}),
             },
           })
-          if (res.ok) {
-            const data = await res.json()
-            const adviseeList = Array.isArray(data) ? data : (data.items || data.data || [])
+          if (advisorRes.ok) {
+            const data = await advisorRes.json()
+            const relations = data?.data || []
+            // Extract students from relations where this user is the professor
+            const adviseeList = relations
+              .filter((r: any) => r.professor_id === user.id || r.professor?.id === user.id)
+              .map((r: any) => r.student || { id: r.student_id, name: '', email: '' })
+              .filter((s: any) => s && s.id)
             setAdvisees(adviseeList)
           }
         } catch {
-          // advisees endpoint not available
+          // advisors endpoint not available
         }
       }
 
@@ -109,6 +129,9 @@ export default function Profile() {
     }).catch(() => {
       setLoading(false)
     })
+
+    // Google Calendar status
+    api.gcal.status().then((r: any) => setGcalConnected(r.connected)).catch(() => {})
 
     // Fetch projects
     setProjectsLoading(true)
@@ -176,6 +199,12 @@ export default function Profile() {
     }
   }
 
+  const handleDisconnectGcal = async () => {
+    if (!confirm('Google Calendar 연결을 해제하시겠습니까?')) return
+    await api.gcal.disconnect()
+    setGcalConnected(false)
+  }
+
   const roleLabel = (r: string) => {
     const map: Record<string, string> = { professor: '교수', student: '학생', external: '외부업체' }
     return map[r] || r
@@ -183,14 +212,14 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <div style={{ maxWidth: 1000, margin: '0 auto', padding: '60px 0', textAlign: 'center' }}>
+      <div style={{ width: '100%', padding: '60px 0', textAlign: 'center' }}>
         <div style={{ color: '#94a3b8', fontSize: 15 }}>프로필 로딩 중...</div>
       </div>
     )
   }
 
   return (
-    <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ width: '100%' }}>
       {/* Header */}
       <div style={{ marginBottom: 32 }} className="animate-fade-in">
         <h1 style={{ fontSize: 26, fontWeight: 600, color: '#0f172a', fontFamily: 'var(--font-display)' }}>
@@ -516,6 +545,35 @@ export default function Profile() {
                   </div>
                 )
               })
+            )}
+          </div>
+        </div>
+        {/* External Service Integration */}
+        <div className="opacity-0 animate-fade-in stagger-4" style={{ ...cardStyle, overflow: 'hidden', padding: 24, marginTop: 0 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, color: '#1e293b' }}>외부 서비스 연동</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4338ca" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              <div>
+                <div style={{ fontWeight: 500, color: '#1e293b' }}>Google Calendar</div>
+                <div style={{ fontSize: 13, color: gcalConnected ? '#047857' : '#94a3b8' }}>
+                  {gcalConnected ? '연결됨' : '연결 안 됨'}
+                </div>
+              </div>
+            </div>
+            {gcalConnected ? (
+              <button onClick={handleDisconnectGcal}
+                style={{ padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                  background: '#fee2e2', color: '#be123c', border: 'none', cursor: 'pointer' }}>
+                연결 해제
+              </button>
+            ) : (
+              <a href="/api/v1/auth/login"
+                style={{ padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                  background: '#e0e7ff', color: '#4338ca', border: 'none',
+                  textDecoration: 'none', cursor: 'pointer' }}>
+                연결하기
+              </a>
             )}
           </div>
         </div>

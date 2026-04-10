@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_project_role
 from app.models.project import Project, ProjectMember, ProjectMemberRole, ProjectStatus
 from app.models.task import Task, TaskStatus
 from app.models.user import User, UserRole
@@ -26,14 +26,25 @@ router = APIRouter()
 @router.get("/")
 async def list_projects(
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     status_filter: ProjectStatus | None = Query(None, alias="status"),
     q: str | None = None,
 ):
-    """List projects with pagination and optional status filter."""
+    """List projects with pagination and optional status filter.
+
+    External users only see projects they are members of.
+    Other roles (admin, professor, student) see all projects.
+    """
     query = select(Project)
+
+    # External users: restrict to projects they are members of
+    if current_user.role == UserRole.external:
+        member_project_ids = select(ProjectMember.project_id).where(
+            ProjectMember.user_id == current_user.id
+        )
+        query = query.where(Project.id.in_(member_project_ids))
 
     if status_filter is not None:
         query = query.where(Project.status == status_filter)
@@ -210,26 +221,19 @@ async def add_member(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Add a member to a project. Only lead/manager/admin can add members."""
+    """Add a member to a project. Only lead/manager/professor/admin can add members."""
     # Check project exists
     result = await db.execute(select(Project).where(Project.id == project_id))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    # Check permission
-    if current_user.role != UserRole.admin:
-        member_result = await db.execute(
-            select(ProjectMember).where(
-                ProjectMember.project_id == project_id,
-                ProjectMember.user_id == current_user.id,
-                ProjectMember.project_role.in_([ProjectMemberRole.lead, ProjectMemberRole.manager]),
-            )
-        )
-        if member_result.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only project lead, manager, or admin can add members",
-            )
+    # Check permission: admin, professor, or project lead/manager
+    await require_project_role(
+        project_id,
+        [ProjectMemberRole.lead, ProjectMemberRole.manager],
+        current_user,
+        db,
+    )
 
     # Check user exists
     result = await db.execute(select(User).where(User.id == body.user_id))
@@ -275,26 +279,20 @@ async def remove_member(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Remove a member from a project. Only lead/manager/admin can remove."""
+    """Remove a member from a project. Only lead/manager/professor/admin or self can remove."""
     # Check project exists
     result = await db.execute(select(Project).where(Project.id == project_id))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    # Check permission
-    if current_user.role != UserRole.admin and current_user.id != user_id:
-        member_result = await db.execute(
-            select(ProjectMember).where(
-                ProjectMember.project_id == project_id,
-                ProjectMember.user_id == current_user.id,
-                ProjectMember.project_role.in_([ProjectMemberRole.lead, ProjectMemberRole.manager]),
-            )
+    # Allow members to remove themselves; otherwise require lead/manager/professor/admin
+    if current_user.id != user_id:
+        await require_project_role(
+            project_id,
+            [ProjectMemberRole.lead, ProjectMemberRole.manager],
+            current_user,
+            db,
         )
-        if member_result.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only project lead, manager, admin, or the member themselves can remove membership",
-            )
 
     # Find and delete the membership
     result = await db.execute(

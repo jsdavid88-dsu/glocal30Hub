@@ -7,6 +7,7 @@ export interface UserInfo {
   name: string
   role: 'professor' | 'student' | 'external' | 'admin'
   profile_image_url?: string | null
+  google_calendar_connected?: boolean
 }
 
 interface AuthContextType {

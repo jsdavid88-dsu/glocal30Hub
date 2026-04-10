@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,6 +37,8 @@ class User(UUIDMixin, TimestampMixin, Base):
     company: Mapped[str | None] = mapped_column(String(150), nullable=True)
     google_subject: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    google_refresh_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    google_calendar_connected: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class AdvisorRelation(UUIDMixin, Base):

@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import require_role
+from app.models.audit import AuditLog
 from app.models.project import Project, ProjectMember
 from app.models.tag import Tag
 from app.models.user import AdvisorRelation, User, UserRole, UserStatus
@@ -118,7 +119,23 @@ async def admin_update_user_role(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    old_role = user.role.value
     user.role = body.role
+
+    # Audit log
+    audit = AuditLog(
+        actor_id=current_user.id,
+        action_type="role_change",
+        target_type="user",
+        target_id=user_id,
+        payload={
+            "user_id": str(user_id),
+            "old_role": old_role,
+            "new_role": body.role.value,
+        },
+    )
+    db.add(audit)
+
     await db.commit()
     await db.refresh(user)
     return {"id": str(user.id), "name": user.name, "role": user.role.value}
@@ -181,6 +198,23 @@ async def admin_assign_advisor(
 
     relation = AdvisorRelation(professor_id=body.professor_id, student_id=user_id)
     db.add(relation)
+
+    # Audit log
+    audit = AuditLog(
+        actor_id=current_user.id,
+        action_type="advisor_change",
+        target_type="advisor_relation",
+        target_id=None,
+        payload={
+            "action": "assign",
+            "professor_id": str(body.professor_id),
+            "student_id": str(user_id),
+            "professor_name": professor.name,
+            "student_name": student.name,
+        },
+    )
+    db.add(audit)
+
     await db.commit()
     await db.refresh(relation)
 
@@ -212,6 +246,20 @@ async def admin_remove_advisor(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Advisor relation not found",
         )
+
+    # Audit log
+    audit = AuditLog(
+        actor_id=current_user.id,
+        action_type="advisor_change",
+        target_type="advisor_relation",
+        target_id=advisor_id,
+        payload={
+            "action": "remove",
+            "professor_id": str(relation.professor_id),
+            "student_id": str(user_id),
+        },
+    )
+    db.add(audit)
 
     await db.delete(relation)
     await db.commit()
@@ -444,3 +492,41 @@ async def admin_delete_tag(
     await db.delete(tag)
     await db.commit()
     return {"detail": "Tag deleted"}
+
+
+# ═══════════════════════════════════════════════════════════════
+#  감사 로그 (Audit Log)
+# ═══════════════════════════════════════════════════════════════
+
+
+@router.get("/audit-log")
+async def admin_list_audit_log(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(admin_dep),
+    limit: int = Query(100, ge=1, le=500),
+    action_type: str | None = None,
+):
+    """List recent audit log entries. Only admin/professor can view."""
+    query = select(AuditLog)
+
+    if action_type is not None:
+        query = query.where(AuditLog.action_type == action_type)
+
+    query = query.order_by(AuditLog.created_at.desc()).limit(limit)
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    return {
+        "data": [
+            {
+                "id": str(log.id),
+                "actor_id": str(log.actor_id) if log.actor_id else None,
+                "action_type": log.action_type,
+                "target_type": log.target_type,
+                "target_id": str(log.target_id) if log.target_id else None,
+                "payload": log.payload,
+                "created_at": log.created_at.isoformat() if log.created_at else None,
+            }
+            for log in logs
+        ]
+    }

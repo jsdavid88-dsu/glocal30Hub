@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.encryption import encrypt_value
 from app.database import get_db
 from app.dependencies import ALGORITHM, get_current_user
 from app.models.user import User, UserStatus
@@ -26,6 +27,14 @@ oauth.register(
     client_secret=settings.GOOGLE_CLIENT_SECRET,
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
     client_kwargs={"scope": "openid email profile"},
+)
+# Separate registration for calendar scope (used by /connect-gcal)
+oauth.register(
+    name="google_calendar",
+    client_id=settings.GOOGLE_CLIENT_ID,
+    client_secret=settings.GOOGLE_CLIENT_SECRET,
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile https://www.googleapis.com/auth/calendar"},
 )
 
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.SESSION_MAX_AGE // 60  # match session lifetime
@@ -51,7 +60,10 @@ def _create_access_token(user: User) -> str:
 async def login(request: Request):
     """Redirect to Google OAuth consent screen."""
     redirect_uri = settings.GOOGLE_REDIRECT_URI
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    return await oauth.google.authorize_redirect(
+        request,
+        redirect_uri,
+    )
 
 
 @router.get("/callback")
@@ -102,6 +114,7 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
             user.profile_image_url = picture
 
     user.last_login_at = datetime.now(timezone.utc)
+
     await db.commit()
     await db.refresh(user)
 
@@ -109,6 +122,49 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
 
     # Redirect to frontend with token
     frontend_url = f"{settings.FRONTEND_URL}/auth/callback?token={access_token}"
+    return RedirectResponse(url=frontend_url)
+
+
+@router.get("/connect-gcal")
+async def connect_gcal(request: Request):
+    """Redirect to Google OAuth with calendar scope (explicit user opt-in)."""
+    redirect_uri = settings.GOOGLE_REDIRECT_URI.replace("/callback", "/gcal-callback")
+    return await oauth.google_calendar.authorize_redirect(
+        request,
+        redirect_uri,
+        access_type="offline",
+        prompt="consent",
+    )
+
+
+@router.get("/gcal-callback")
+async def gcal_callback(request: Request, db: AsyncSession = Depends(get_db)):
+    """Handle Google Calendar OAuth callback — store refresh token."""
+    try:
+        token = await oauth.google_calendar.authorize_access_token(request)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"OAuth error: {exc}",
+        )
+
+    userinfo = token.get("userinfo")
+    if userinfo is None:
+        raise HTTPException(status_code=401, detail="Could not retrieve user info")
+
+    google_sub: str = userinfo["sub"]
+    result = await db.execute(select(User).where(User.google_subject == google_sub))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found. Please login first.")
+
+    refresh_token = token.get("refresh_token")
+    if refresh_token:
+        user.google_refresh_token = encrypt_value(refresh_token)
+        user.google_calendar_connected = True
+        await db.commit()
+
+    frontend_url = f"{settings.FRONTEND_URL}/profile?gcal=connected"
     return RedirectResponse(url=frontend_url)
 
 

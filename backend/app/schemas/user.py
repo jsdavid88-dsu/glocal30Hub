@@ -16,6 +16,7 @@ class UserResponse(BaseModel):
     major_field: str | None = None
     interest_fields: list = Field(default_factory=list)
     company: str | None = None
+    google_calendar_connected: bool = False
     last_login_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

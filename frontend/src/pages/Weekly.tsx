@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { api } from '../api/client'
 import { useRole } from '../contexts/RoleContext'
 import MiniCalendar from '../components/MiniCalendar'
@@ -484,6 +484,8 @@ function ProfessorWeekly() {
 
   // Save status for drag-and-drop assignments
   const [assignSaveStatus, setAssignSaveStatus] = useState<'saving' | 'saved' | 'error' | null>(null)
+  // Queue to serialize assignment API calls and prevent race conditions
+  const assignQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   // Student summaries from API
   const [apiStudentSummaries, setApiStudentSummaries] = useState<StudentSummary[]>([])
@@ -626,7 +628,7 @@ function ProfessorWeekly() {
         // Try dedicated API first
         let summaries: StudentSummary[] = []
         try {
-          const summaryRes: any = await (api as any).tasks?.summaryByStudent(weekStartKey)
+          const summaryRes: any = await api.weekly.getSummary(weekStartKey)
           if (summaryRes && Array.isArray(summaryRes.data || summaryRes.items || summaryRes)) {
             const rawSummaries: any[] = summaryRes.data || summaryRes.items || summaryRes
             summaries = rawSummaries.map((s: any) => ({
@@ -769,24 +771,40 @@ function ProfessorWeekly() {
         return next
       })
 
-      // Persist assignment to API with rollback on failure
+      // Persist assignment to API with rollback on failure (serialized via queue)
       if (student.id) {
         setAssignSaveStatus('saving')
-        api.tasks.assign(taskId, student.id, true).then(() => {
-          setAssignSaveStatus('saved')
-          setTimeout(() => setAssignSaveStatus(null), 2000)
-        }).catch(() => {
-          setAssignSaveStatus('error')
-          setTimeout(() => setAssignSaveStatus(null), 3000)
-          // Rollback: remove from student, put back to previous owner or pool
-          setAssignments((prev) => {
-            const next = { ...prev }
-            next[studentName] = next[studentName].filter((id) => id !== taskId)
-            if (currentOwner) {
-              next[currentOwner] = [...(next[currentOwner] || []), taskId]
+        const prevStudent = currentOwner ? apiStudents.find((s) => s.name === currentOwner) : null
+        const capturedStudentId = student.id
+        const capturedStudentName = studentName
+
+        assignQueueRef.current = assignQueueRef.current.then(async () => {
+          try {
+            // Unassign from previous student first if needed
+            if (prevStudent?.id) {
+              await api.tasks.unassign(taskId, prevStudent.id).catch(() => {})
             }
-            return next
-          })
+            await api.tasks.assign(taskId, capturedStudentId, true)
+            setAssignSaveStatus('saved')
+            setTimeout(() => setAssignSaveStatus(null), 2000)
+          } catch (err: any) {
+            // 409 = already assigned to this student, treat as success
+            if (err?.message?.includes('409')) {
+              setAssignSaveStatus('saved')
+              setTimeout(() => setAssignSaveStatus(null), 2000)
+              return
+            }
+            setAssignSaveStatus('error')
+            setTimeout(() => setAssignSaveStatus(null), 3000)
+            setAssignments((prev) => {
+              const next = { ...prev }
+              next[capturedStudentName] = next[capturedStudentName].filter((id) => id !== taskId)
+              if (currentOwner) {
+                next[currentOwner] = [...(next[currentOwner] || []), taskId]
+              }
+              return next
+            })
+          }
         })
       }
     }
@@ -799,22 +817,27 @@ function ProfessorWeekly() {
           next[currentOwner] = next[currentOwner].filter((id) => id !== taskId)
           return next
         })
-        // Unassign from API with rollback on failure
+        // Unassign from API with rollback on failure (serialized via queue)
         const student = apiStudents.find((s) => s.name === currentOwner)
         if (student?.id) {
           setAssignSaveStatus('saving')
-          api.tasks.unassign(taskId, student.id).then(() => {
-            setAssignSaveStatus('saved')
-            setTimeout(() => setAssignSaveStatus(null), 2000)
-          }).catch(() => {
-            setAssignSaveStatus('error')
-            setTimeout(() => setAssignSaveStatus(null), 3000)
-            // Rollback: re-assign to previous owner
-            setAssignments((prev) => {
-              const next = { ...prev }
-              next[currentOwner] = [...(next[currentOwner] || []), taskId]
-              return next
-            })
+          const capturedStudentId = student.id
+          const capturedOwner = currentOwner
+
+          assignQueueRef.current = assignQueueRef.current.then(async () => {
+            try {
+              await api.tasks.unassign(taskId, capturedStudentId)
+              setAssignSaveStatus('saved')
+              setTimeout(() => setAssignSaveStatus(null), 2000)
+            } catch {
+              setAssignSaveStatus('error')
+              setTimeout(() => setAssignSaveStatus(null), 3000)
+              setAssignments((prev) => {
+                const next = { ...prev }
+                next[capturedOwner] = [...(next[capturedOwner] || []), taskId]
+                return next
+              })
+            }
           })
         }
       }
@@ -1419,7 +1442,7 @@ function StudentWeekly() {
         // Try to get summary from dedicated API
         try {
           const weekStart = formatDateKey(getMonday(new Date()))
-          const summaryRes: any = await (api as any).tasks?.summaryByStudent(weekStart)
+          const summaryRes: any = await api.weekly.getSummary(weekStart)
           if (summaryRes) {
             const data = summaryRes.data || summaryRes.items || summaryRes
             if (data && !Array.isArray(data)) {

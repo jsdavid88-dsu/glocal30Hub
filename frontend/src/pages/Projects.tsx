@@ -114,7 +114,7 @@ export default function Projects() {
             const membersRes: any = await api.projects.members(row.id)
             const members: any[] = membersRes?.data || membersRes || []
             const lead = members.find((m: any) => m.project_role === 'lead')
-            return { id: row.id, pi: lead?.name || lead?.user_name || '' }
+            return { id: row.id, pi: lead?.name || lead?.user?.name || lead?.user_name || '' }
           } catch {
             return { id: row.id, pi: '' }
           }

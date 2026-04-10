@@ -59,19 +59,6 @@ async function adminFetch(path: string, options?: RequestInit) {
   return res.json()
 }
 
-const roleLabels: Record<string, string> = {
-  admin: '관리자',
-  professor: '교수',
-  student: '학생',
-  external: '외부업체',
-}
-
-const statusLabels: Record<string, string> = {
-  active: '활성',
-  inactive: '비활성',
-  pending: '대기',
-}
-
 const projectStatusLabels: Record<string, string> = {
   active: '진행중',
   paused: '일시중지',
@@ -92,8 +79,7 @@ function formatDate(iso: string | null) {
 
 const pageStyle: React.CSSProperties = {
   padding: '32px 40px',
-  maxWidth: 1200,
-  margin: '0 auto',
+  width: '100%',
 }
 
 const headerStyle: React.CSSProperties = {
