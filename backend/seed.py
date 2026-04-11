@@ -22,6 +22,7 @@ from app.models.user import AdvisorRelation, User, UserRole, UserStatus
 from app.models.attendance import Attendance, AttendanceType
 
 # ─── Fixed UUIDs ──────────────────────────────────────────────────────────────
+ADMIN_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 PROF_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 STUDENT1_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 STUDENT2_ID = uuid.UUID("00000000-0000-0000-0000-000000000003")
@@ -64,6 +65,9 @@ async def reset_and_seed():
 
         # ── Users ─────────────────────────────────────────────────────────
         users = [
+            User(id=ADMIN_ID, email="admin@test.com", name="관리자",
+                 role=UserRole.admin, status=UserStatus.active,
+                 google_subject="google_admin_001"),
             User(id=PROF_ID, email="professor@test.com", name="김교수",
                  role=UserRole.professor, status=UserStatus.active,
                  major_field="컴퓨터공학", google_subject="google_prof_001"),
