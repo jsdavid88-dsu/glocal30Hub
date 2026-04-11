@@ -110,6 +110,35 @@ async def require_project_role(
     return member
 
 
+async def require_project_membership(
+    project_id: uuid.UUID,
+    user: User,
+    db: AsyncSession,
+) -> None:
+    """Check if the user is allowed to view the project.
+
+    Policy (see issues #7, #8):
+    - admin, professor: always allowed (they can see everything)
+    - student, external: must be a member of the project
+
+    Raises 403 if the user is not allowed.
+    """
+    if user.role in (UserRole.admin, UserRole.professor):
+        return
+
+    result = await db.execute(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user.id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a member of this project",
+        )
+
+
 async def require_advisor_of(
     student_id: uuid.UUID,
     user: User,

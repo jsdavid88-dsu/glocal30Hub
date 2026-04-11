@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_project_membership
 from app.models.project import Project
 from app.models.task import Task, TaskAssignee, TaskGroup, TaskGroupStatus, TaskPriority, TaskStatus
 from app.models.user import User, UserRole
@@ -189,10 +189,11 @@ async def _get_group_or_404(db: AsyncSession, group_id: uuid.UUID) -> TaskGroup:
 async def list_project_groups(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """List task groups for a project, ordered by `order` field, with task_count."""
     await _check_project_exists(db, project_id)
+    await require_project_membership(project_id, current_user, db)
 
     # Fetch groups with task count via subquery
     task_count_subq = (
@@ -414,7 +415,7 @@ async def merge_groups(
 async def list_project_tasks(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     status_filter: TaskStatus | None = Query(None, alias="status"),
@@ -426,6 +427,7 @@ async def list_project_tasks(
 ):
     """List tasks for a project with filtering and pagination."""
     await _check_project_exists(db, project_id)
+    await require_project_membership(project_id, current_user, db)
 
     query = select(Task).where(Task.project_id == project_id)
 
@@ -466,10 +468,11 @@ async def list_project_tasks(
 async def get_project_task_tree(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return tasks in a tree structure (top-level tasks with nested children)."""
     await _check_project_exists(db, project_id)
+    await require_project_membership(project_id, current_user, db)
 
     # Fetch all tasks for the project
     result = await db.execute(

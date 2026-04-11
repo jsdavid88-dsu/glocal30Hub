@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.dependencies import get_current_user, require_project_role
+from app.dependencies import (
+    get_current_user,
+    require_project_membership,
+    require_project_role,
+)
 from app.models.project import Project, ProjectMember, ProjectMemberRole, ProjectStatus
 from app.models.task import Task, TaskStatus
 from app.models.user import User, UserRole
@@ -34,13 +38,14 @@ async def list_projects(
 ):
     """List projects with pagination and optional status filter.
 
-    External users only see projects they are members of.
-    Other roles (admin, professor, student) see all projects.
+    Policy (see issues #7, #8):
+    - admin, professor: see all projects
+    - student, external: see only projects they are members of
     """
     query = select(Project)
 
-    # External users: restrict to projects they are members of
-    if current_user.role == UserRole.external:
+    # Student + external: restrict to projects they are members of
+    if current_user.role not in (UserRole.admin, UserRole.professor):
         member_project_ids = select(ProjectMember.project_id).where(
             ProjectMember.user_id == current_user.id
         )
@@ -143,13 +148,14 @@ async def create_project(
 async def get_project(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Get project detail by ID."""
+    """Get project detail by ID. Members-only for student/external."""
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await require_project_membership(project_id, current_user, db)
     return project
 
 
@@ -194,13 +200,14 @@ async def update_project(
 async def list_members(
     project_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """List members of a project."""
+    """List members of a project. Members-only for student/external."""
     # Check project exists
     result = await db.execute(select(Project).where(Project.id == project_id))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await require_project_membership(project_id, current_user, db)
 
     query = (
         select(ProjectMember)
