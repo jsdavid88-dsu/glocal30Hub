@@ -8,8 +8,8 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.comment import Comment
-from app.models.daily import DailyBlock, DailyLog
-from app.models.user import User
+from app.models.daily import BlockVisibility, DailyBlock, DailyLog
+from app.models.user import AdvisorRelation, User, UserRole
 from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
 from app.services.notifications import create_notification
 
@@ -40,9 +40,31 @@ def _to_response(comment: Comment, include_replies: bool = True) -> CommentRespo
 async def list_comments(
     block_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """List top-level comments for a daily block, with nested replies."""
+    # Verify block visibility
+    block_result = await db.execute(
+        select(DailyBlock)
+        .options(selectinload(DailyBlock.daily_log))
+        .where(DailyBlock.id == block_id)
+    )
+    block = block_result.scalar_one_or_none()
+    if block is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Block not found")
+    if block.daily_log.author_id != current_user.id:
+        if block.visibility == BlockVisibility.private:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access private block")
+        if block.visibility == BlockVisibility.advisor:
+            adv = await db.execute(
+                select(AdvisorRelation).where(
+                    AdvisorRelation.professor_id == current_user.id,
+                    AdvisorRelation.student_id == block.daily_log.author_id,
+                )
+            )
+            if adv.scalar_one_or_none() is None and current_user.role not in (UserRole.admin,):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access advisor-only block")
+
     query = (
         select(Comment)
         .options(
@@ -64,7 +86,29 @@ async def create_comment(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Add a comment to a daily block. Any authenticated user can comment."""
+    """Add a comment to a daily block. Any authenticated user can comment (if visible)."""
+    # Verify block visibility before allowing comment
+    block_vis_result = await db.execute(
+        select(DailyBlock)
+        .options(selectinload(DailyBlock.daily_log))
+        .where(DailyBlock.id == block_id)
+    )
+    block_vis = block_vis_result.scalar_one_or_none()
+    if block_vis is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Block not found")
+    if block_vis.daily_log.author_id != current_user.id:
+        if block_vis.visibility == BlockVisibility.private:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access private block")
+        if block_vis.visibility == BlockVisibility.advisor:
+            adv = await db.execute(
+                select(AdvisorRelation).where(
+                    AdvisorRelation.professor_id == current_user.id,
+                    AdvisorRelation.student_id == block_vis.daily_log.author_id,
+                )
+            )
+            if adv.scalar_one_or_none() is None and current_user.role not in (UserRole.admin,):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access advisor-only block")
+
     # Validate parent_id if provided
     if body.parent_id is not None:
         parent_result = await db.execute(

@@ -247,7 +247,7 @@ async def update_sota_item(
     item_id: uuid.UUID,
     body: SotaItemUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Update a SOTA item."""
     item = await _get_item_or_404(db, item_id)
@@ -329,10 +329,18 @@ async def update_assignment(
     assignment_id: uuid.UUID,
     body: SotaAssignmentUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Update assignment status or due date."""
     assignment = await _get_assignment_or_404(db, assignment_id)
+
+    # Only professor/admin or the assignee can update
+    if current_user.role not in (UserRole.professor, UserRole.admin):
+        if assignment.assignee_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the assignee or professor/admin can update this assignment",
+            )
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -357,6 +365,14 @@ async def submit_review(
 ):
     """Submit a review for a SOTA assignment."""
     assignment = await _get_assignment_or_404(db, assignment_id)
+
+    # Only the assignee or professor/admin can submit a review
+    if current_user.role not in (UserRole.professor, UserRole.admin):
+        if assignment.assignee_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the assignee or professor/admin can submit a review for this assignment",
+            )
 
     review = SotaReview(
         sota_assignment_id=assignment_id,

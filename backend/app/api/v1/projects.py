@@ -11,6 +11,7 @@ from app.dependencies import (
     get_current_user,
     require_project_membership,
     require_project_role,
+    require_role,
 )
 from app.models.project import Project, ProjectMember, ProjectMemberRole, ProjectStatus
 from app.models.task import Task, TaskStatus
@@ -117,7 +118,7 @@ async def list_projects(
 async def create_project(
     body: ProjectCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Create a new project. Creator is automatically added as lead."""
     project = Project(

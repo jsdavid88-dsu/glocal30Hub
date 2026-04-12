@@ -8,10 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_project_membership
 from app.models.daily import BlockVisibility
 from app.models.event import Event, EventSource, EventType
-from app.models.user import User
+from app.models.project import ProjectMember
+from app.models.user import User, UserRole
 
 router = APIRouter()
 
@@ -73,7 +74,7 @@ class EventResponse(BaseModel):
 @router.get("/")
 async def list_events(
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
     page: int = Query(1, ge=1),
@@ -86,6 +87,17 @@ async def list_events(
         query = query.where(Event.end_at >= start_date)
     if end_date is not None:
         query = query.where(Event.start_at <= end_date)
+
+    # Visibility filtering for student/external users
+    if current_user.role not in (UserRole.admin, UserRole.professor):
+        user_project_ids = select(ProjectMember.project_id).where(
+            ProjectMember.user_id == current_user.id
+        )
+        query = query.where(
+            (Event.creator_id == current_user.id)
+            | (Event.project_id.in_(user_project_ids))
+            | (Event.visibility == BlockVisibility.internal)
+        )
 
     # Total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -107,13 +119,36 @@ async def list_events(
 async def get_event(
     event_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Get a single event by ID."""
     result = await db.execute(select(Event).where(Event.id == event_id))
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    # Visibility check for student/external users
+    if current_user.role not in (UserRole.admin, UserRole.professor):
+        if event.creator_id != current_user.id and event.visibility != BlockVisibility.internal:
+            # Check project membership if event has a project
+            if event.project_id is not None:
+                pm_result = await db.execute(
+                    select(ProjectMember).where(
+                        ProjectMember.project_id == event.project_id,
+                        ProjectMember.user_id == current_user.id,
+                    )
+                )
+                if pm_result.scalar_one_or_none() is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="You do not have access to this event",
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to this event",
+                )
+
     return event
 
 
@@ -124,6 +159,9 @@ async def create_event(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new event."""
+    if body.project_id is not None:
+        await require_project_membership(body.project_id, current_user, db)
+
     if body.end_at < body.start_at:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

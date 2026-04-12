@@ -56,7 +56,7 @@ def _build_title(body: ReportGenerateRequest) -> str:
 @router.get("/", response_model=list[ReportResponse])
 async def list_reports(
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
     report_type: ReportType | None = Query(None),
     scope_type: ReportScopeType | None = Query(None),
     period_start: date | None = Query(None),
@@ -97,7 +97,7 @@ async def list_reports(
 async def get_report(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Get a single report by ID."""
     report = await _get_report_or_404(db, report_id)
@@ -108,7 +108,7 @@ async def get_report(
 async def create_report(
     body: ReportCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Create a report manually."""
     report = ReportSnapshot(
@@ -131,7 +131,7 @@ async def create_report(
 async def generate_report(
     body: ReportGenerateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Generate a report by collecting dailies, tasks, and attendance data
     for the given scope and period.
@@ -249,7 +249,7 @@ async def generate_report(
 async def delete_report(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.professor)),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Delete a report. Professor only."""
     report = await _get_report_or_404(db, report_id)

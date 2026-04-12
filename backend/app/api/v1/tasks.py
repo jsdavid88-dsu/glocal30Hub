@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.dependencies import get_current_user, require_project_membership
+from app.dependencies import get_current_user, require_project_membership, require_role
 from app.models.project import Project
 from app.models.task import Task, TaskAssignee, TaskGroup, TaskGroupStatus, TaskPriority, TaskStatus
 from app.models.user import User, UserRole
@@ -232,10 +232,11 @@ async def create_group(
     project_id: uuid.UUID,
     body: TaskGroupCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new task group in a project."""
     await _check_project_exists(db, project_id)
+    await require_project_membership(project_id, current_user, db)
 
     # Determine the next order value
     result = await db.execute(
@@ -273,10 +274,11 @@ async def update_group(
     group_id: uuid.UUID,
     body: TaskGroupUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a task group (name, color, description, status)."""
     group = await _get_group_or_404(db, group_id)
+    await require_project_membership(group.project_id, current_user, db)
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -308,10 +310,11 @@ async def update_group(
 async def delete_group(
     group_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a task group. Tasks in this group get group_id set to NULL (not deleted)."""
     group = await _get_group_or_404(db, group_id)
+    await require_project_membership(group.project_id, current_user, db)
 
     # Nullify group_id on all tasks in this group
     await db.execute(
@@ -327,10 +330,11 @@ async def reorder_groups(
     project_id: uuid.UUID,
     body: TaskGroupReorder,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Bulk reorder task groups. Receives ordered list of group_ids, updates order field."""
     await _check_project_exists(db, project_id)
+    await require_project_membership(project_id, current_user, db)
 
     # Fetch all groups for this project to validate
     result = await db.execute(
@@ -353,7 +357,7 @@ async def reorder_groups(
     await db.commit()
 
     # Return updated list using the list endpoint logic
-    return await list_project_groups(project_id, db, _current_user)
+    return await list_project_groups(project_id, db, current_user)
 
 
 @router.post("/groups/{group_id}/merge/{target_group_id}", response_model=TaskGroupResponse)
@@ -361,7 +365,7 @@ async def merge_groups(
     group_id: uuid.UUID,
     target_group_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Merge: move all tasks from source group to target, then delete source group."""
     if group_id == target_group_id:
@@ -371,6 +375,7 @@ async def merge_groups(
         )
 
     source = await _get_group_or_404(db, group_id)
+    await require_project_membership(source.project_id, current_user, db)
     target = await _get_group_or_404(db, target_group_id)
 
     if source.project_id != target.project_id:
@@ -516,6 +521,7 @@ async def create_task(
 ):
     """Create a new task in a project."""
     await _check_project_exists(db, project_id)
+    await require_project_membership(project_id, current_user, db)
 
     # Validate parent_id if provided
     if body.parent_id is not None:
@@ -591,7 +597,7 @@ async def list_my_tasks(
 async def carryover_tasks(
     body: TaskCarryoverRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Carry over incomplete tasks by updating their due_date.
 
@@ -628,7 +634,7 @@ async def carryover_tasks(
 async def task_summary_by_student(
     week_start: date = Query(..., description="Start of week (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Return task completion stats grouped by student (assignee).
 
@@ -680,10 +686,11 @@ async def task_summary_by_student(
 async def get_task(
     task_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Get task detail with assignees and children."""
     task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
+    await require_project_membership(task.project_id, current_user, db)
     return task
 
 
@@ -696,6 +703,7 @@ async def update_task(
 ):
     """Update a task's fields (including reparenting via parent_id)."""
     task = await _get_task_or_404(db, task_id)
+    await require_project_membership(task.project_id, current_user, db)
 
     update_data = body.model_dump(exclude_unset=True)
 
@@ -732,6 +740,7 @@ async def update_task_status(
 ):
     """Quick status update for a task."""
     task = await _get_task_or_404(db, task_id)
+    await require_project_membership(task.project_id, current_user, db)
 
     task.status = body.status
     task.updated_by = current_user.id
@@ -761,6 +770,7 @@ async def group_tasks(
     - Max depth limit of 3 levels
     """
     parent_task = await _get_task_or_404(db, task_id)
+    await require_project_membership(parent_task.project_id, current_user, db)
 
     # Cannot group a task under itself
     if task_id in body.child_task_ids:
@@ -835,6 +845,7 @@ async def ungroup_tasks(
     If child_task_ids is empty, ungroups all children.
     """
     parent_task = await _get_task_or_404(db, task_id)
+    await require_project_membership(parent_task.project_id, current_user, db)
 
     if body.child_task_ids:
         # Ungroup specific children
@@ -884,6 +895,7 @@ async def add_assignee(
 ):
     """Assign a user to a task."""
     task = await _get_task_or_404(db, task_id)
+    await require_project_membership(task.project_id, current_user, db)
 
     # Check user exists
     result = await db.execute(select(User).where(User.id == body.user_id))
@@ -939,10 +951,11 @@ async def remove_assignee(
     task_id: uuid.UUID,
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Remove a user from a task."""
-    await _get_task_or_404(db, task_id)
+    task = await _get_task_or_404(db, task_id)
+    await require_project_membership(task.project_id, current_user, db)
 
     result = await db.execute(
         select(TaskAssignee).where(

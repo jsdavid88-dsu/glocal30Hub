@@ -5,9 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_role
 from app.models.tag import Tag, TagScopeType
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.tag import TagCreate, TagResponse, TagUpdate
 
 router = APIRouter()
@@ -38,7 +38,7 @@ async def list_tags(
 async def create_tag(
     body: TagCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Create a new tag."""
     tag = Tag(
@@ -58,7 +58,7 @@ async def update_tag(
     tag_id: uuid.UUID,
     body: TagUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Update a tag."""
     result = await db.execute(select(Tag).where(Tag.id == tag_id))
@@ -79,7 +79,7 @@ async def update_tag(
 async def delete_tag(
     tag_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Delete a tag."""
     result = await db.execute(select(Tag).where(Tag.id == tag_id))

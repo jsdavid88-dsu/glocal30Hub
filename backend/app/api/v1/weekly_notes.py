@@ -45,7 +45,7 @@ class WeeklyNoteResponse(BaseModel):
 async def save_weekly_note(
     body: WeeklyNoteCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Save or update weekly meeting notes for a given week.
 
@@ -105,7 +105,7 @@ async def save_weekly_note(
 async def get_weekly_note(
     week_start: date = Query(..., description="Monday of the target week (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.professor, UserRole.admin)),
 ):
     """Retrieve weekly meeting notes for a given week."""
     result = await db.execute(
