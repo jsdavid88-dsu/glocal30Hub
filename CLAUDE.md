@@ -236,6 +236,22 @@ GOOGLE_CALENDAR_ENABLED=true
 
 ---
 
+## Windows 서버 주의사항
+
+**E2E 테스트 반복 실행 시 포트 고갈 주의.** Windows 기본 동적 포트 범위가 16,384개뿐이라, Playwright을 여러 번 돌리면 TIME_WAIT 상태의 TCP 연결이 포트를 전부 점유하여 서버가 응답 불가 상태가 됨.
+
+**사전 적용 필요 (관리자 권한, 1회):**
+```powershell
+netsh int ipv4 set dynamicport tcp start=1025 num=64511
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v TcpTimedWaitDelay /t REG_DWORD /d 30 /f
+```
+적용 후 재부팅. 이후에는 E2E 테스트 반복 실행해도 포트 부족 안 생김.
+
+**증상:** Vite proxy 타임아웃, 로딩이 극도로 느려짐, `netstat -an | find "TIME_WAIT"` 결과가 수천 개.
+**임시 해결:** 재부팅 (TIME_WAIT 전부 해제).
+
+---
+
 ## 알려진 이슈 / TODO
 
 - **#6** — 하이브리드 검색 (pgvector + BM25, 장기)
