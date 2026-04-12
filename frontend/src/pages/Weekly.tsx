@@ -442,7 +442,7 @@ export default function Weekly() {
 
   return (
     <div key={`weekly-${currentRole}`} style={{ width: '100%' }}>
-      {currentRole === 'professor' && <ProfessorWeekly />}
+      {(currentRole === 'professor' || currentRole === 'admin') && <ProfessorWeekly />}
       {currentRole === 'student' && <StudentWeekly />}
       {currentRole === 'external' && <ExternalWeekly />}
     </div>
