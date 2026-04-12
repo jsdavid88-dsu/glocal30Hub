@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../api/client'
 
@@ -133,7 +133,7 @@ export default function MemberDetail() {
   // Permission check: which tabs to show
   const visibleTabs = useMemo<{ key: TabKey; label: string }[]>(() => {
     const tabs: { key: TabKey; label: string }[] = [{ key: 'overview', label: '개요' }]
-    if (currentRole === 'professor' || currentUser?.id === id) {
+    if (isPrivileged(currentRole) || currentUser?.id === id) {
       tabs.push({ key: 'tasks', label: '태스크' })
       tabs.push({ key: 'daily', label: '데일리' })
       tabs.push({ key: 'attendance', label: '출결' })

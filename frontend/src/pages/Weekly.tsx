@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { api } from '../api/client'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 import MiniCalendar from '../components/MiniCalendar'
 import {
   DndContext,
@@ -442,7 +442,7 @@ export default function Weekly() {
 
   return (
     <div key={`weekly-${currentRole}`} style={{ width: '100%' }}>
-      {(currentRole === 'professor' || currentRole === 'admin') && <ProfessorWeekly />}
+      {isPrivileged(currentRole) && <ProfessorWeekly />}
       {currentRole === 'student' && <StudentWeekly />}
       {currentRole === 'external' && <ExternalWeekly />}
     </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -616,7 +616,7 @@ export default function Calendar() {
       </div>
 
       {/* Professor student filter */}
-      {currentRole === 'professor' && (
+      {isPrivileged(currentRole) && (
         <div className="opacity-0 animate-fade-in stagger-1" style={{ marginBottom: 16 }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 12,

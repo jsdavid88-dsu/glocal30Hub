@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useRole, type Role } from '../contexts/RoleContext'
+import { useRole, isPrivileged, type Role } from '../contexts/RoleContext'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../api/client'
 
@@ -117,7 +117,7 @@ export default function Dashboard() {
       </div>
 
       {/* Role-specific content */}
-      {(currentRole === 'admin' || currentRole === 'professor') && <ProfessorView />}
+      {isPrivileged(currentRole) && <ProfessorView />}
       {currentRole === 'student' && <StudentView />}
       {currentRole === 'external' && <ExternalView />}
 

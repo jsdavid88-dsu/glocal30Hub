@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 
 const API_BASE = '/api/v1'
 
@@ -525,7 +525,7 @@ export default function Reports() {
 
               {/* Actions */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20, paddingTop: 16, borderTop: '1px solid #f1f5f9' }}>
-                {currentRole === 'professor' && (
+                {isPrivileged(currentRole) && (
                   <button
                     onClick={() => handleDelete(selectedReport.id)}
                     style={{

@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef, useId } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 import { api } from '../api/client'
 import MiniCalendar from '../components/MiniCalendar'
 import FeedFilterBar, { type FeedFilters } from '../components/FeedFilterBar'
@@ -1011,7 +1011,7 @@ export default function DailyFeed() {
 
   // Role-based entry filtering
   const roleFilteredEntries = entries.filter((entry) => {
-    if (currentRole === 'professor') {
+    if (isPrivileged(currentRole)) {
       return true
     }
     if (currentRole === 'student') {
@@ -1307,7 +1307,7 @@ export default function DailyFeed() {
               { value: '', label: '전체' },
               ...[...new Set(roleFilteredEntries.map(e => e.date))].sort().reverse().map(d => ({ value: d, label: d })),
             ]} />
-            {currentRole === 'professor' && (
+            {isPrivileged(currentRole) && (
               <FilterSelect label="학생" value={filterAuthor} onChange={setFilterAuthor} options={[
                 { value: '', label: '전체' },
                 ...visibleAuthors.map(a => ({ value: a, label: a })),

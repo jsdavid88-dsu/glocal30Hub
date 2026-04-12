@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 import { api } from '../api/client'
 
 type Status = '진행중' | '일시중단' | '계획중' | '완료'
@@ -220,7 +220,7 @@ export default function Projects() {
             {projects.length}개 프로젝트 · {projects.filter(p => p.status === '진행중').length}개 진행중
           </p>
         </div>
-        {(currentRole === 'professor') && (
+        {(isPrivileged(currentRole)) && (
           <button
             onClick={() => setShowCreateModal(true)}
             style={{

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../api/client'
 
@@ -178,7 +178,7 @@ export default function Members() {
 
   const visibleMembers = useMemo(() => {
     return allMembers.filter((m) => {
-      if (currentRole === 'professor') return true
+      if (isPrivileged(currentRole)) return true
       if (currentRole === 'student') return m.apiRole === 'student' || m.apiRole === 'professor'
       if (currentRole === 'external') return m.apiRole !== 'external' || m.id === currentUser?.id
       return true
@@ -523,7 +523,7 @@ export default function Members() {
                   padding: 24,
                   cursor: 'pointer',
                   transition: 'box-shadow 0.2s, transform 0.2s',
-                  borderLeft: member.isAdvisee && currentRole === 'professor'
+                  borderLeft: member.isAdvisee && isPrivileged(currentRole)
                     ? '4px solid #f59e0b'
                     : isExpanded ? '4px solid #4f46e5' : undefined,
                 }}
@@ -558,7 +558,7 @@ export default function Members() {
                         {member.status}
                       </span>
                       {/* 지도학생 badge */}
-                      {currentRole === 'professor' && member.isAdvisee && (
+                      {isPrivileged(currentRole) && member.isAdvisee && (
                         <span style={{
                           padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 600,
                           background: '#fef3c7', color: '#b45309',
@@ -567,7 +567,7 @@ export default function Members() {
                         </span>
                       )}
                       {/* Role badge for professor view */}
-                      {currentRole === 'professor' && member.apiRole === 'student' && !member.isAdvisee && (
+                      {isPrivileged(currentRole) && member.apiRole === 'student' && !member.isAdvisee && (
                         <span style={{
                           padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 500,
                           background: '#e0e7ff', color: '#4338ca',
@@ -578,7 +578,7 @@ export default function Members() {
                     </div>
                     <p style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{member.role}</p>
                     {/* Advisor name for student cards (professor view) */}
-                    {currentRole === 'professor' && member.apiRole === 'student' && member.advisorName && !member.isAdvisee && (
+                    {isPrivileged(currentRole) && member.apiRole === 'student' && member.advisorName && !member.isAdvisee && (
                       <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>
                         지도교수: {member.advisorName}
                       </p>
@@ -653,7 +653,7 @@ export default function Members() {
                 </div>
 
                 {/* Professor view: register advisee button */}
-                {currentRole === 'professor' && member.apiRole === 'student' && !member.isAdvisee && (
+                {isPrivileged(currentRole) && member.apiRole === 'student' && !member.isAdvisee && (
                   <div style={{ marginTop: 12 }}>
                     <button
                       onClick={(e) => {

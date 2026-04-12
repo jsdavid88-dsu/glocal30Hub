@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 import { api } from '../api/client'
 
 /* ── Types ─────────────────────────────────────── */
@@ -221,7 +221,7 @@ export default function ProjectDetail() {
   // Drag state
   const [dragTaskId, setDragTaskId] = useState<string | null>(null)
 
-  const canManage = currentRole === 'professor' || members.some(
+  const canManage = isPrivileged(currentRole) || members.some(
     m => m.project_role === 'lead'
     // In a real app, compare with current user ID
   )

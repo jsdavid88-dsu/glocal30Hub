@@ -39,3 +39,8 @@ export function RoleProvider({ children }: { children: ReactNode }) {
 export function useRole() {
   return useContext(RoleContext)
 }
+
+/** admin과 professor는 동일한 관리 권한을 가짐 (UI 기준) */
+export function isPrivileged(role: Role): boolean {
+  return role === 'admin' || role === 'professor'
+}

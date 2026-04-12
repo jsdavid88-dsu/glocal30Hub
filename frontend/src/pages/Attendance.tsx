@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useRole } from '../contexts/RoleContext'
+import { useRole, isPrivileged } from '../contexts/RoleContext'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ const cardStyle = {
 
 export default function Attendance() {
   const { currentRole } = useRole()
-  const isProfessor = currentRole === 'professor'
+  const isProfessor = isPrivileged(currentRole)
 
   // Today's attendance state
   const [checkedIn, setCheckedIn] = useState(false)
