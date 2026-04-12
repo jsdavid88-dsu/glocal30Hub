@@ -288,7 +288,7 @@ export default function Admin() {
   const [activeTab, setActiveTab] = useState<TabKey>('users')
 
   // Access check
-  if (currentRole !== 'professor') {
+  if (currentRole !== 'admin') {
     return (
       <div style={pageStyle}>
         <div style={{ ...emptyStyle, fontSize: 16 }}>
