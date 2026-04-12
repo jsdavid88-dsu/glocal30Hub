@@ -53,6 +53,7 @@ const hoverRow = {
 
 // ─── Greeting subtitle map ───
 const greetingSubtitleMap: Record<Role, string> = {
+  admin: '시스템 전체 현황을 관리하세요.',
   professor: '지도학생 현황과 연구실 활동을 확인하세요.',
   student: '오늘의 태스크와 일정을 확인하세요.',
   external: '참여 프로젝트 현황을 확인하세요.',
@@ -116,7 +117,7 @@ export default function Dashboard() {
       </div>
 
       {/* Role-specific content */}
-      {currentRole === 'professor' && <ProfessorView />}
+      {(currentRole === 'admin' || currentRole === 'professor') && <ProfessorView />}
       {currentRole === 'student' && <StudentView />}
       {currentRole === 'external' && <ExternalView />}
 

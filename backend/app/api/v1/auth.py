@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.encryption import encrypt_value
 from app.database import get_db
-from app.dependencies import ALGORITHM, get_current_user
+from app.dependencies import ALGORITHM, get_current_user, get_current_user_any_status
 from app.models.user import User, UserStatus
 from app.schemas.user import UserResponse
 
@@ -169,7 +169,7 @@ async def gcal_callback(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(current_user: Annotated[User, Depends(get_current_user)]):
+async def me(current_user: Annotated[User, Depends(get_current_user_any_status)]):
     """Return current authenticated user info."""
     return current_user
 

@@ -25,8 +25,8 @@ from app.schemas.user import UserSummaryResponse
 
 router = APIRouter()
 
-# Admin dependency: professor or admin only
-admin_dep = require_role(UserRole.admin, UserRole.professor)
+# Admin dependency: admin only (professors no longer have admin panel access)
+admin_dep = require_role(UserRole.admin)
 
 
 # ═══════════════════════════════════════════════════════════════

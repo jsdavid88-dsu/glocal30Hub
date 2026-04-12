@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 
-export type Role = 'professor' | 'student' | 'external'
+export type Role = 'admin' | 'professor' | 'student' | 'external'
 
 interface RoleContextType {
   currentRole: Role
@@ -22,7 +22,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]))
         const role = payload.role as Role
-        if (['professor', 'student', 'external'].includes(role)) {
+        if (['admin', 'professor', 'student', 'external'].includes(role)) {
           setRole(role)
         }
       } catch {}

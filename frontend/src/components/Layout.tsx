@@ -127,34 +127,36 @@ const allNavItems = [
   {
     section: 'Main',
     items: [
-      { path: '/', label: 'Dashboard', icon: DashboardIcon, roles: ['professor', 'student', 'external'] as Role[] },
+      { path: '/', label: 'Dashboard', icon: DashboardIcon, roles: ['admin', 'professor', 'student', 'external'] as Role[] },
       { path: '/daily/write', label: 'Daily Write', icon: DailyWriteIcon, roles: ['student'] as Role[] },
-      { path: '/daily/feed', label: 'Daily', icon: PublicationsIcon, roles: ['professor', 'student', 'external'] as Role[] },
-      { path: '/weekly', label: 'Weekly', icon: WeeklyIcon, roles: ['professor', 'student', 'external'] as Role[] },
-      { path: '/projects', label: 'Projects', icon: ProjectsIcon, roles: ['professor', 'student', 'external'] as Role[] },
+      { path: '/daily/feed', label: 'Daily', icon: PublicationsIcon, roles: ['admin', 'professor', 'student', 'external'] as Role[] },
+      { path: '/weekly', label: 'Weekly', icon: WeeklyIcon, roles: ['admin', 'professor', 'student', 'external'] as Role[] },
+      { path: '/projects', label: 'Projects', icon: ProjectsIcon, roles: ['admin', 'professor', 'student', 'external'] as Role[] },
     ],
   },
   {
     section: 'Management',
     items: [
-      { path: '/sota', label: 'SOTA', icon: SotaIcon, roles: ['professor', 'student', 'external'] as Role[] },
-      { path: '/reports', label: 'Reports', icon: ReportsIcon, roles: ['professor', 'student'] as Role[] },
-      { path: '/members', label: 'Students', icon: TeamIcon, roles: ['professor'] as Role[] },
-      { path: '/calendar', label: 'Calendar', icon: CalendarIcon, roles: ['professor', 'student', 'external'] as Role[] },
-      { path: '/attendance', label: 'Attendance', icon: AttendanceIcon, roles: ['student'] as Role[] },
-      { path: '/profile', label: 'Profile', icon: ProfileIcon, roles: ['professor', 'student', 'external'] as Role[] },
-      { path: '/admin', label: 'Admin', icon: AdminIcon, roles: ['professor'] as Role[] },
+      { path: '/sota', label: 'SOTA', icon: SotaIcon, roles: ['admin', 'professor', 'student', 'external'] as Role[] },
+      { path: '/reports', label: 'Reports', icon: ReportsIcon, roles: ['admin', 'professor', 'student'] as Role[] },
+      { path: '/members', label: 'Students', icon: TeamIcon, roles: ['admin', 'professor'] as Role[] },
+      { path: '/calendar', label: 'Calendar', icon: CalendarIcon, roles: ['admin', 'professor', 'student', 'external'] as Role[] },
+      { path: '/attendance', label: 'Attendance', icon: AttendanceIcon, roles: ['admin', 'student'] as Role[] },
+      { path: '/profile', label: 'Profile', icon: ProfileIcon, roles: ['admin', 'professor', 'student', 'external'] as Role[] },
+      { path: '/admin', label: 'Admin', icon: AdminIcon, roles: ['admin'] as Role[] },
     ],
   },
 ]
 
 const roleConfig: Record<Role, { label: string; initials: string; title: string; subtitle: string; gradient: string }> = {
+  admin: { label: '관리자', initials: 'AD', title: '시스템 관리자', subtitle: 'Admin', gradient: 'linear-gradient(135deg, #dc2626, #991b1b)' },
   professor: { label: '교수', initials: 'PI', title: '연구책임자', subtitle: 'PI', gradient: 'linear-gradient(135deg, #4f46e5, #3730a3)' },
   student: { label: '학생', initials: 'ST', title: '대학원생', subtitle: 'Student', gradient: 'linear-gradient(135deg, #059669, #047857)' },
   external: { label: '외부업체', initials: 'EX', title: '외부 파트너', subtitle: 'External', gradient: 'linear-gradient(135deg, #d97706, #b45309)' },
 }
 
 const roleBadgeColors: Record<Role, { bg: string; color: string }> = {
+  admin: { bg: '#fee2e2', color: '#991b1b' },
   professor: { bg: '#e0e7ff', color: '#4338ca' },
   student: { bg: '#d1fae5', color: '#047857' },
   external: { bg: '#fef3c7', color: '#b45309' },
@@ -283,9 +285,9 @@ export default function Layout() {
                 <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', padding: '0 4px', whiteSpace: 'nowrap' as const }}>
                   [DEV] 역할 전환
                 </span>
-                {(['professor', 'student', 'external'] as Role[]).map((role) => {
+                {(['admin', 'professor', 'student', 'external'] as Role[]).map((role) => {
                   const active = currentRole === role
-                  const labels: Record<Role, string> = { professor: '교수', student: '학생', external: '외부업체' }
+                  const labels: Record<Role, string> = { admin: '관리자', professor: '교수', student: '학생', external: '외부업체' }
                   return (
                     <button
                       key={role}

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.project import ProjectMember, ProjectMemberRole
-from app.models.user import AdvisorRelation, User, UserRole
+from app.models.user import AdvisorRelation, User, UserRole, UserStatus
 
 security = HTTPBearer(auto_error=False)
 
@@ -52,6 +52,43 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    # Block pending/inactive users from all endpoints.
+    # Exception: /auth/me uses get_current_user_any_status instead.
+    if user.status != UserStatus.active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is pending approval. Please wait for admin activation.",
+        )
+    return user
+
+
+async def get_current_user_any_status(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Same as get_current_user but allows pending/inactive users.
+
+    Only used for /auth/me so the frontend can show account status.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
 
 
