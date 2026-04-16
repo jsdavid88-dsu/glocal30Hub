@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 3000,
+    allowedHosts: ['.trycloudflare.com', '.ts.net', '.ngrok-free.app'],
     fs: {
       allow: ['..'],
       strict: false,
