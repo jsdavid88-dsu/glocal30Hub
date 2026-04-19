@@ -368,9 +368,75 @@ enum 변경과 테이블 생성을 분리하는 이유: PostgreSQL에서 `ALTER 
 
 ---
 
-## 10. 미래 확장 (이번 스코프 외)
+## 10. Google Calendar 자동 동기화 확장
+
+현재 Event 모델만 Google Calendar과 양방향 동기화됨. 태스크/공지는 연결 안 됨.
+이번에 같이 구현한다.
+
+### 10.1 태스크 → Google Calendar
+
+**트리거:** 태스크 생성/수정 시 `due_date`가 있으면
+
+**플로우:**
+1. `tasks.py` — 태스크 생성/수정 API에서 `due_date` 존재 확인
+2. Event 자동 생성 (또는 기존 연결된 Event 업데이트):
+   - `title`: 태스크 title
+   - `event_type`: `EventType.deadline`
+   - `start_at` / `end_at`: due_date 기준 all-day 이벤트
+   - `source`: `EventSource.task`
+   - `task_id`: 해당 태스크 ID
+   - `project_id`: 태스크의 project_id
+   - `visibility`: `BlockVisibility.project`
+   - `creator_id`: 태스크 생성자
+3. 해당 Event → `create_gcal_event()` 또는 `update_gcal_event()` 호출
+4. 태스크의 assignee들 → EventParticipant로 등록
+
+**삭제/완료 처리:**
+- 태스크 삭제 시 → 연결된 Event도 삭제 + `delete_gcal_event()`
+- 태스크 `done` 상태 → Event 삭제하지 않음 (캘린더에 완료 표시로 남김)
+- `due_date` null로 변경 시 → 연결된 Event 삭제
+
+**기존 태스크 마이그레이션:**
+- 배포 시 1회성 스크립트로 기존 `due_date` 있는 태스크에 대해 Event 일괄 생성
+- 단, Google Calendar push는 하지 않음 (과거 데이터 밀어넣기 방지)
+
+### 10.2 공지 → Google Calendar
+
+**트리거:** 공지 생성 시 `expires_at`이 있으면
+
+**플로우:**
+1. `announcements.py` — 공지 생성 API에서 `expires_at` 존재 확인
+2. Event 자동 생성:
+   - `title`: "📢 " + 공지 title
+   - `event_type`: `EventType.admin`
+   - `start_at`: 공지 created_at
+   - `end_at`: expires_at
+   - `source`: `EventSource.manual`
+   - `visibility`: audience 기반 매핑 (everyone→internal, project→project 등)
+   - `creator_id`: 공지 작성자
+3. 대상자 전원 → EventParticipant 등록 + 각자 Google Calendar push
+
+**삭제 처리:**
+- 공지 삭제 시 → 연결된 Event 삭제 + `delete_gcal_event()`
+
+### 10.3 구현 위치
+
+| 파일 | 변경 |
+|------|------|
+| `tasks.py` | create/update/delete 엔드포인트에 Event 자동 생성/수정/삭제 + gcal 호출 추가 |
+| `announcements.py` (신규) | create/delete 엔드포인트에 Event 생성/삭제 + gcal 호출 추가 |
+| `google_calendar.py` | 변경 없음 (기존 함수 재활용) |
+
+### 10.4 주의사항
+
+- Google Calendar 연결 안 한 사용자는 gcal push 스킵 (기존 로직과 동일)
+- gcal API 실패 시 본 작업은 롤백하지 않음 (best-effort, 기존 패턴)
+- Event 모델에 `announcement_id` FK는 추가하지 않음 — `task_id`처럼 nullable FK를 추가하면 Event가 비대해짐. 대신 공지-이벤트 관계는 공지 body에 event_id를 저장하거나, Event의 description에 공지 참조를 넣는 방식으로 경량 처리
+
+---
+
+## 11. 미래 확장 (이번 스코프 외)
 
 - SOTA 리뷰 피드 통합 (SOTA 별도 개발 후)
-- 태스크/데일리 → Google Calendar 동기화
 - 피드 패널 실시간 업데이트 (WebSocket or SSE, 현재는 폴링)
-- 공지 → Google Calendar 이벤트 자동 생성
+- 데일리 로그 → Google Calendar (일정 성격이 아니라 우선순위 낮음)
