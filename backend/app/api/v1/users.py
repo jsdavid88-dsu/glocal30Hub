@@ -141,13 +141,13 @@ async def add_advisor_relation(
             detail="Only admins and professors can create advisor relations",
         )
 
-    # Validate professor exists and has professor role
+    # Validate advisor exists and has professor or admin role
     result = await db.execute(select(User).where(User.id == body.professor_id))
     professor = result.scalar_one_or_none()
-    if professor is None or professor.role != UserRole.professor:
+    if professor is None or professor.role not in (UserRole.professor, UserRole.admin):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Professor not found or user is not a professor",
+            detail="Advisor must be a professor or admin",
         )
 
     # Validate student exists
