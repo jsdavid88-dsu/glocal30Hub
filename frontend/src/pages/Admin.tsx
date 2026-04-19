@@ -379,7 +379,7 @@ function UsersTab() {
     setAdvisorModal(user)
     setSelectedProfessor('')
     // Filter professors from current user list
-    setProfessorList(users.filter(u => u.role === 'professor'))
+    setProfessorList(users.filter(u => u.role === 'professor' || u.role === 'admin'))
   }
 
   const handleAssignAdvisor = async () => {

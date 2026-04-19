@@ -177,7 +177,7 @@ async def admin_assign_advisor(
     # Validate professor
     result = await db.execute(select(User).where(User.id == body.professor_id))
     professor = result.scalar_one_or_none()
-    if professor is None or professor.role != UserRole.professor:
+    if professor is None or professor.role not in (UserRole.professor, UserRole.admin):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Professor not found or user is not a professor",
