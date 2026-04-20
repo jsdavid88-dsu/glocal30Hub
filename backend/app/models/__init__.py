@@ -12,6 +12,8 @@ from app.models.notification import Notification, NotificationType
 from app.models.audit import AuditLog
 from app.models.sota import SotaItem, SotaAssignment, SotaReview, SotaAssignmentStatus
 from app.models.report import ReportSnapshot, ReportType, ReportScopeType
+from app.models.announcement import Announcement, AnnouncementRead, AnnouncementAudience
+from app.models.push_subscription import PushSubscription
 
 __all__ = [
     "Base",
@@ -41,4 +43,8 @@ __all__ = [
     "SotaItem", "SotaAssignment", "SotaReview", "SotaAssignmentStatus",
     # Report
     "ReportSnapshot", "ReportType", "ReportScopeType",
+    # Announcement
+    "Announcement", "AnnouncementRead", "AnnouncementAudience",
+    # PushSubscription
+    "PushSubscription",
 ]

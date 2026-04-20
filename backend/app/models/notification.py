@@ -18,6 +18,7 @@ class NotificationType(str, enum.Enum):
     event_reminder = "event_reminder"
     report_published = "report_published"
     sota_assigned = "sota_assigned"
+    announcement = "announcement"
 
 
 class Notification(UUIDMixin, Base):
