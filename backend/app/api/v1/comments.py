@@ -12,6 +12,7 @@ from app.models.daily import BlockVisibility, DailyBlock, DailyLog
 from app.models.user import AdvisorRelation, User, UserRole
 from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
 from app.services.notifications import create_notification
+from app.services.web_push import send_push_to_user
 
 router = APIRouter()
 
@@ -159,6 +160,17 @@ async def create_comment(
 
     await db.commit()
     await db.refresh(comment)
+
+    # Send web push to block author (best-effort, after commit)
+    if block and block.daily_log and block.daily_log.author_id != current_user.id:
+        await send_push_to_user(
+            db,
+            user_id=block.daily_log.author_id,
+            title="데일리에 새 댓글이 달렸습니다",
+            body=body.content[:100] if body.content else "",
+            url=f"/daily/feed",
+            push_type="comment",
+        )
 
     # Re-fetch with author relationship and replies
     result = await db.execute(

@@ -19,6 +19,7 @@ from app.schemas.announcement import (
     AnnouncementUpdate,
 )
 from app.models.notification import Notification
+from app.services.web_push import send_push_to_users
 
 router = APIRouter()
 
@@ -208,6 +209,16 @@ async def create_announcement(
 
     await db.commit()
     await db.refresh(announcement, attribute_names=["author", "reads"])
+
+    # Send web push to target users (best-effort, after commit)
+    push_targets = [uid for uid in target_ids if uid != current_user.id]
+    await send_push_to_users(
+        db, push_targets,
+        title=f"\U0001f4e2 {body.title}",
+        body=body.body[:100] if body.body else "",
+        url="/",
+        push_type="announcement",
+    )
 
     return await _enrich_response(announcement, current_user, db)
 

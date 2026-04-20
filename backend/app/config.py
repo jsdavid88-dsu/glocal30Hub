@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # Google Calendar
     GOOGLE_CALENDAR_ENABLED: bool = True
 
+    # Web Push (VAPID)
+    VAPID_PRIVATE_KEY: str = ""
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_SUBJECT: str = "mailto:admin@glocal30hub.com"
+
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
 

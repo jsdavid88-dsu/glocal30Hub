@@ -14,6 +14,7 @@ from app.models.project import Project
 from app.models.task import Task, TaskAssignee, TaskGroup, TaskGroupStatus, TaskPriority, TaskStatus
 from app.models.user import User, UserRole
 from app.services.notifications import create_notification
+from app.services.web_push import send_push_to_user
 from app.schemas.task import (
     TaskAssigneeCreate,
     TaskAssigneeResponse,
@@ -935,6 +936,17 @@ async def add_assignee(
 
     await db.commit()
     await db.refresh(assignee)
+
+    # Send web push to assigned user (best-effort, after commit)
+    if body.user_id != current_user.id:
+        await send_push_to_user(
+            db,
+            user_id=body.user_id,
+            title="새 태스크가 배정되었습니다",
+            body=task.title[:100],
+            url=f"/projects/{task.project_id}",
+            push_type="task_assigned",
+        )
 
     # Re-fetch with user relationship
     result = await db.execute(
