@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, users, projects, tasks, tags, comments, daily, events, weekly_notes, uploads, attendance, notifications, admin, sota, reports, gcal, announcements
+from app.api.v1 import auth, users, projects, tasks, tags, comments, daily, events, weekly_notes, uploads, attendance, notifications, admin, sota, reports, gcal, announcements, push, feed
 
 api_router = APIRouter()
 
@@ -22,3 +22,5 @@ api_router.include_router(sota.router, prefix="/sota", tags=["sota"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(gcal.router)
 api_router.include_router(announcements.router, prefix="/announcements", tags=["announcements"])
+api_router.include_router(push.router, prefix="/push", tags=["push"])
+api_router.include_router(feed.router, prefix="/feed", tags=["feed"])
