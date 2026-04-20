@@ -209,6 +209,33 @@ export const api = {
       request(`/sota/assignments/${assignmentId}/review`, { method: 'POST', body: JSON.stringify(data) }),
     my: (params?: Record<string, string>) => request(`/sota/my?${new URLSearchParams(params)}`),
   },
+  // Announcements
+  announcements: {
+    create: (data: Record<string, unknown>) =>
+      request('/announcements/', { method: 'POST', body: JSON.stringify(data) }),
+    list: (params?: Record<string, string>) =>
+      request(`/announcements/?${new URLSearchParams(params)}`),
+    get: (id: string) => request(`/announcements/${id}`),
+    update: (id: string, data: Record<string, unknown>) =>
+      request(`/announcements/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    delete: (id: string) =>
+      request(`/announcements/${id}`, { method: 'DELETE' }),
+    markRead: (id: string) =>
+      request(`/announcements/${id}/read`, { method: 'POST' }),
+  },
+  // Feed
+  feed: {
+    list: (params?: Record<string, string>) =>
+      request(`/feed/?${new URLSearchParams(params)}`),
+  },
+  // Push
+  push: {
+    subscribe: (data: Record<string, string>) =>
+      request('/push/subscribe', { method: 'POST', body: JSON.stringify(data) }),
+    unsubscribe: () =>
+      request('/push/subscribe', { method: 'DELETE' }),
+    vapidKey: () => request('/push/vapid-key'),
+  },
   // Admin
   admin: {
     users: () => request('/admin/users'),
