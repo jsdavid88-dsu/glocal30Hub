@@ -147,7 +147,7 @@ export default function FeedPanel({ collapsed, onToggle }: Props) {
   return (
     <div style={{
       width: 320,
-      height: '100vh',
+      height: '100%',
       borderLeft: '1px solid #e2e8f0',
       background: '#ffffff',
       display: 'flex',

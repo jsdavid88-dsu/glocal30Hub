@@ -3,6 +3,8 @@ import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useRole, type Role } from '../contexts/RoleContext'
 import { useAuth } from '../contexts/AuthContext'
 import { useMediaQuery } from '../hooks/useMediaQuery'
+import { api } from '../api/client'
+import FeedPanel from './FeedPanel'
 
 interface NotificationItem {
   id: string
@@ -167,6 +169,7 @@ export default function Layout() {
   const { currentRole, setRole } = useRole()
   const { user, logout } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [feedCollapsed, setFeedCollapsed] = useState(false)
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const isWide = useMediaQuery('(min-width: 1024px)')
 
@@ -178,6 +181,42 @@ export default function Layout() {
   useEffect(() => {
     setMobileOpen(false)
   }, [location.pathname])
+
+  // Auto-collapse feed panel on mobile
+  useEffect(() => {
+    if (!isDesktop) setFeedCollapsed(true)
+  }, [isDesktop])
+
+  // Push notification subscription setup
+  useEffect(() => {
+    async function setupPush() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+      try {
+        const reg = await navigator.serviceWorker.register('/sw.js')
+        const permission = await Notification.requestPermission()
+        if (permission !== 'granted') return
+
+        const vapidRes: any = await api.push.vapidKey()
+        if (!vapidRes.publicKey) return
+
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: vapidRes.publicKey,
+        })
+        const subJson = sub.toJSON()
+        if (subJson.endpoint && subJson.keys) {
+          await api.push.subscribe({
+            endpoint: subJson.endpoint,
+            p256dh: subJson.keys.p256dh!,
+            auth: subJson.keys.auth!,
+          })
+        }
+      } catch (err) {
+        console.error('Push setup failed:', err)
+      }
+    }
+    setupPush()
+  }, [])
 
   const navItems = allNavItems.map((group) => ({
     ...group,
@@ -339,10 +378,16 @@ export default function Layout() {
           </div>
         </header>
 
-        {/* Page content */}
-        <main style={{ flex: 1, overflowY: 'auto', background: '#f8fafc', padding: isWide ? '28px 32px' : isDesktop ? '24px 20px' : '16px 12px' }}>
-          <Outlet />
-        </main>
+        {/* Page content + Feed panel */}
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          <main style={{ flex: 1, overflowY: 'auto', background: '#f8fafc', padding: isWide ? '28px 32px' : isDesktop ? '24px 20px' : '16px 12px' }}>
+            <Outlet />
+          </main>
+          <FeedPanel
+            collapsed={feedCollapsed}
+            onToggle={() => setFeedCollapsed(c => !c)}
+          />
+        </div>
       </div>
     </div>
   )
