@@ -6,9 +6,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.announcement import Announcement, AnnouncementAudience, AnnouncementRead
+from app.models.daily import BlockVisibility
+from app.models.event import Event, EventSource, EventType
 from app.models.notification import NotificationType
 from app.models.project import ProjectMember, ProjectMemberRole
 from app.models.user import User, UserRole, UserStatus
@@ -220,6 +223,46 @@ async def create_announcement(
         push_type="announcement",
     )
 
+    # Google Calendar sync (best-effort) — create event if expires_at is set
+    if (
+        settings.GOOGLE_CALENDAR_ENABLED
+        and body.expires_at
+        and current_user.google_refresh_token
+        and current_user.google_calendar_connected
+    ):
+        try:
+            # Map audience to visibility
+            visibility_map = {
+                AnnouncementAudience.everyone: BlockVisibility.internal,
+                AnnouncementAudience.professors: BlockVisibility.advisor,
+                AnnouncementAudience.students: BlockVisibility.internal,
+                AnnouncementAudience.project: BlockVisibility.project,
+            }
+            event = Event(
+                title=f"\U0001f4e2 {body.title}",
+                event_type=EventType.admin,
+                start_at=announcement.created_at,
+                end_at=body.expires_at,
+                all_day=False,
+                creator_id=current_user.id,
+                project_id=body.project_id,
+                visibility=visibility_map.get(body.audience, BlockVisibility.internal),
+                source=EventSource.manual,
+            )
+            db.add(event)
+            await db.commit()
+            await db.refresh(event)
+
+            from app.services.google_calendar import create_gcal_event
+            google_event_id = await create_gcal_event(
+                current_user.google_refresh_token, event
+            )
+            if google_event_id:
+                event.google_event_id = google_event_id
+                await db.commit()
+        except Exception:
+            pass
+
     return await _enrich_response(announcement, current_user, db)
 
 
@@ -384,6 +427,34 @@ async def delete_announcement(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only author or admin can delete this announcement",
         )
+
+    # Remove linked calendar event (best-effort)
+    try:
+        linked_title = f"\U0001f4e2 {announcement.title}"
+        event_result = await db.execute(
+            select(Event).where(
+                Event.title == linked_title,
+                Event.creator_id == announcement.author_id,
+                Event.event_type == EventType.admin,
+                Event.source == EventSource.manual,
+            )
+        )
+        linked_event = event_result.scalar_one_or_none()
+        if linked_event is not None:
+            if (
+                settings.GOOGLE_CALENDAR_ENABLED
+                and linked_event.google_event_id
+                and current_user.google_refresh_token
+                and current_user.google_calendar_connected
+            ):
+                from app.services.google_calendar import delete_gcal_event
+                await delete_gcal_event(
+                    current_user.google_refresh_token,
+                    linked_event.google_event_id,
+                )
+            await db.delete(linked_event)
+    except Exception:
+        pass
 
     await db.delete(announcement)
     await db.commit()

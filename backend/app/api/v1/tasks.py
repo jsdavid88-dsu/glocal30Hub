@@ -8,8 +8,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_project_membership, require_role
+from app.models.daily import BlockVisibility
+from app.models.event import Event, EventSource, EventType
 from app.models.project import Project
 from app.models.task import Task, TaskAssignee, TaskGroup, TaskGroupStatus, TaskPriority, TaskStatus
 from app.models.user import User, UserRole
@@ -181,6 +184,112 @@ async def _get_group_or_404(db: AsyncSession, group_id: uuid.UUID) -> TaskGroup:
     if group is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task group not found")
     return group
+
+
+async def _sync_task_to_calendar(
+    db: AsyncSession, task: Task, creator_id: uuid.UUID
+) -> None:
+    """Sync a task's due_date to the calendar as a deadline Event.
+
+    - If task has no due_date: remove any linked Event (source=task).
+    - If task has due_date: create or update a linked Event.
+    Google Calendar sync is best-effort (never fails the main operation).
+    """
+    if not settings.GOOGLE_CALENDAR_ENABLED:
+        return
+
+    from datetime import datetime as _dt, time, timezone as _tz
+
+    # Find existing linked event
+    result = await db.execute(
+        select(Event).where(Event.task_id == task.id, Event.source == EventSource.task)
+    )
+    existing_event = result.scalar_one_or_none()
+
+    # Fetch creator for gcal token
+    creator_result = await db.execute(select(User).where(User.id == creator_id))
+    creator = creator_result.scalar_one_or_none()
+
+    if task.due_date is None:
+        # Remove linked event if exists
+        if existing_event is not None:
+            try:
+                if (
+                    existing_event.google_event_id
+                    and creator
+                    and creator.google_refresh_token
+                    and creator.google_calendar_connected
+                ):
+                    from app.services.google_calendar import delete_gcal_event
+                    await delete_gcal_event(
+                        creator.google_refresh_token, existing_event.google_event_id
+                    )
+            except Exception:
+                pass
+            await db.delete(existing_event)
+            await db.commit()
+        return
+
+    # Build start/end from due_date (all-day event)
+    start_at = _dt.combine(task.due_date, time.min, tzinfo=_tz.utc)
+    end_at = _dt.combine(task.due_date, time.min, tzinfo=_tz.utc)
+
+    if existing_event is not None:
+        # Update existing event
+        existing_event.title = task.title
+        existing_event.start_at = start_at
+        existing_event.end_at = end_at
+        await db.commit()
+        await db.refresh(existing_event)
+
+        try:
+            if (
+                existing_event.google_event_id
+                and creator
+                and creator.google_refresh_token
+                and creator.google_calendar_connected
+            ):
+                from app.services.google_calendar import update_gcal_event
+                await update_gcal_event(
+                    creator.google_refresh_token,
+                    existing_event.google_event_id,
+                    existing_event,
+                )
+        except Exception:
+            pass
+    else:
+        # Create new event
+        event = Event(
+            title=task.title,
+            event_type=EventType.deadline,
+            start_at=start_at,
+            end_at=end_at,
+            all_day=True,
+            creator_id=creator_id,
+            project_id=task.project_id,
+            task_id=task.id,
+            visibility=BlockVisibility.project,
+            source=EventSource.task,
+        )
+        db.add(event)
+        await db.commit()
+        await db.refresh(event)
+
+        try:
+            if (
+                creator
+                and creator.google_refresh_token
+                and creator.google_calendar_connected
+            ):
+                from app.services.google_calendar import create_gcal_event
+                google_event_id = await create_gcal_event(
+                    creator.google_refresh_token, event
+                )
+                if google_event_id:
+                    event.google_event_id = google_event_id
+                    await db.commit()
+        except Exception:
+            pass
 
 
 # ── TaskGroup endpoints ──────────────────────────────────────────────────────
@@ -553,6 +662,13 @@ async def create_task(
     task_id = task.id  # capture before commit expires the object
     await db.commit()
 
+    # Sync due_date to calendar (best-effort)
+    try:
+        task_for_sync = await _get_task_or_404(db, task_id)
+        await _sync_task_to_calendar(db, task_for_sync, current_user.id)
+    except Exception:
+        pass
+
     # Re-fetch with assignees and children loaded
     task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
     return task
@@ -726,6 +842,13 @@ async def update_task(
     task.updated_by = current_user.id
 
     await db.commit()
+
+    # Sync due_date to calendar (best-effort)
+    try:
+        task_for_sync = await _get_task_or_404(db, task_id)
+        await _sync_task_to_calendar(db, task_for_sync, current_user.id)
+    except Exception:
+        pass
 
     # Re-fetch with assignees and children
     task = await _get_task_or_404(db, task_id, load_assignees=True, load_children=True)
